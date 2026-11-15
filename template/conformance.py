@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the Mustache spec (interpolation, sections, inverted, comments) against template.bend in a native build."""
+"""Run the Mustache spec (interpolation, sections, inverted, comments, delimiters) against template.bend in a native build."""
 import json
 import os
 import subprocess
@@ -10,7 +10,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "out"
 SPEC = "https://raw.githubusercontent.com/mustache/spec/v1.4.2/specs/{}.json"
-FILES = ["interpolation", "sections", "inverted", "comments"]
+FILES = ["interpolation", "sections", "inverted", "comments", "delimiters"]
 END = "\x01END\x01"
 
 
@@ -43,7 +43,7 @@ def obj(d):
 
 
 def skip(t):
-    return "partials" in t or "{{=" in t["template"] or not isinstance(t["data"], dict)
+    return "partials" in t or not isinstance(t["data"], dict)
 
 
 HEAD = """import Base

@@ -92,3 +92,18 @@ law unclosed_tag:
 
 law partial_refused:
   {run("{{> part}}") == Fail{"partials are not supported"} : Result<&2, &2, String, String>}
+
+law delims_switch:
+  {run("{{=<% %>=}}<%#items%>(<%.%>)<%/items%>{{x}}") == Done{"(a)(b)(c){{x}}"} : Result<&2, &2, String, String>}
+
+law delims_back:
+  {run("{{= | | =}}|user.id||={{ }}=|{{user.id}}") == Done{"77"} : Result<&2, &2, String, String>}
+
+law delims_triple:
+  {run("{{=<% %>=}}<%{name}%>") == Done{"<b>Ann & \"Bo\" 'C'</b>"} : Result<&2, &2, String, String>}
+
+law delims_standalone:
+  {run("a\n  {{=<% %>=}}\nb<%user.id%>\n") == Done{"a\nb7\n"} : Result<&2, &2, String, String>}
+
+law delims_bad:
+  {run("{{=<%=}}") == Fail{"bad set delimiters"} : Result<&2, &2, String, String>}
