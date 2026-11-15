@@ -3,7 +3,7 @@
 Mustache templates: variables, sections, inverted sections, and comments. A variable is HTML-escaped unless you ask for raw output.
 
 ```bend
-import bend-kit-template@0.1.0.0/template.bend as T
+import bend-kit-template@0.1.1.0/template.bend as T
 ```
 
 ```bend
@@ -36,8 +36,9 @@ The context is a Base `Map<&2, T.Value>`. A `Value` is `VStr`, `VBool`, `VList`,
 | `{{^name}}…{{/name}}` | The body once when `{{#name}}` would not render it. |
 | `{{! text }}` | Nothing. |
 | `{{.}}` | The top of the context stack. |
+| `{{=<% %>=}}` | Nothing. The tags after it use `<%` and `%>`. The new delimiters must be two words with no whitespace between `=` and `=`. |
 
-A name is looked up from the innermost section outward. In a dotted name such as `user.id`, only the first part searches the stack. A section, inverted, close, or comment tag alone on its line removes that line.
+A name is looked up from the innermost section outward. In a dotted name such as `user.id`, only the first part searches the stack. A section, inverted, close, comment, or set-delimiter tag alone on its line removes that line. A triple tag with custom delimiters is `<%{name}%>`.
 
 Escaping replaces `&`, `<`, `>`, `"`, and `'` with `&amp;`, `&lt;`, `&gt;`, `&quot;`, and `&#39;`. That makes a value safe in HTML text and in a quoted attribute. It does not make a value safe in a URL, a script, or a style.
 
@@ -48,8 +49,8 @@ Escaping replaces `&`, `<`, `>`, `"`, and `'` with `&amp;`, `&lt;`, `&gt;`, `&qu
 | `render_text(src: String, ctx: Map<&2, Value>)` | `Result<&2, &2, String, String>` | `parse`, then `render`. |
 | `escape(s: String)` | `String` | The HTML escape that `{{name}}` uses. |
 
-Partials (`{{> name}}`), set delimiters (`{{= =}}`), and lambdas are not supported. A template that uses partials or set delimiters fails to parse.
+Partials (`{{> name}}`) and lambdas are not supported. A template that uses partials fails to parse.
 
-`python3 template/conformance.py` runs the Mustache spec v1.4.2 interpolation, sections, inverted, and comments files in a native build. It skips the tests that use partials or set delimiters, or whose data is not a map. All 104 other tests pass. `LAWS.bend` holds escaping laws and a sample of those cases.
+`python3 template/conformance.py` runs the Mustache spec v1.4.2 interpolation, sections, inverted, comments, and delimiters files in a native build. It skips the tests that use partials, or whose data is not a map. All 116 other tests pass. `LAWS.bend` holds escaping laws and a sample of those cases.
 
 `bench/README.md` compares `render` with Rust, JavaScript, and Python libraries.

@@ -22,6 +22,7 @@ type Tok is Data:
   TInv{name: String}
   TClose{name: String}
   TSkip{}
+  TDelim{open: String, close: String}
   TBad{msg: String}
 
 type Lex is Data:
@@ -83,16 +84,40 @@ def cut.go(+s: String, hit: Bool, +pat: String, acc: String) -> String & Maybe<&
 def cut(+s: String, +pat: String) -> String & Maybe<&2, String>:
   cut.go(s, String.starts_with(s, pat), pat, SNil{})
 
+def delim.pair(ws: List<&2, String>) -> Tok:
+  match ws:
+    case Con{o, Con{c, Nil{}}}:
+      TDelim{o, c}
+    case _:
+      TBad{"bad set delimiters"}
+
+def delim.of(ok: Bool, t: String) -> Tok:
+  match ok:
+    case False{}:
+      TBad{"bad set delimiters"}
+    case True{}:
+      delim.pair(List.filter(~String, ~(w => Bool.not(String.is_empty(w))), String.split(String.reverse(String.drop(String.reverse(t), 1n)), ' ')))
+
+# The body of {{=<% %>=}} after its first '=': two delimiters and a closing '='.
+def delim(+t: String) -> Tok:
+  delim.of(String.ends_with(t, "="), t)
+
+def tag.sigil.set(set: Bool, +c: U32, +t: String) -> Tok:
+  match set:
+    case True{}:
+      delim(t)
+    case False{}:
+      +n = String.trim(t)
+      Bool.pick(Tok, U32.is_eq(c, 35), TOpen{n},
+        Bool.pick(Tok, U32.is_eq(c, 94), TInv{n},
+          Bool.pick(Tok, U32.is_eq(c, 47), TClose{n},
+            Bool.pick(Tok, U32.is_eq(c, 33), TSkip{},
+              Bool.pick(Tok, U32.is_eq(c, 38), TRaw{n},
+                Bool.pick(Tok, U32.is_eq(c, 62), TBad{"partials are not supported"},
+                  TVar{SCon{Chr{c}, t}}))))))
+
 def tag.sigil(+c: U32, +t: String) -> Tok:
-  +n = String.trim(t)
-  Bool.pick(Tok, U32.is_eq(c, 35), TOpen{n},
-    Bool.pick(Tok, U32.is_eq(c, 94), TInv{n},
-      Bool.pick(Tok, U32.is_eq(c, 47), TClose{n},
-        Bool.pick(Tok, U32.is_eq(c, 33), TSkip{},
-          Bool.pick(Tok, U32.is_eq(c, 38), TRaw{n},
-            Bool.pick(Tok, U32.is_eq(c, 62), TBad{"partials are not supported"},
-              Bool.pick(Tok, U32.is_eq(c, 61), TBad{"set delimiters are not supported"},
-                TVar{SCon{Chr{c}, t}})))))))
+  tag.sigil.set(U32.is_eq(c, 61), c, t)
 
 def tag.plain(name: String) -> Tok:
   match name:
@@ -116,27 +141,41 @@ def lex.close(text: String, triple: Bool, p: String & Maybe<&2, String>) -> Lex:
     case Some{r}:
       LTag{text, tag.of(triple, String.trim(inner)), r}
 
-def lex.open(triple: Bool, text: String, +a: String) -> Lex:
+def lex.open(triple: Bool, text: String, +a: String, +c: String) -> Lex:
   match triple:
     case True{}:
-      lex.close(text, True{}, cut(String.drop(a, 1n), "}}}"))
+      lex.close(text, True{}, cut(String.drop(a, 1n), "}" ++ c))
     case False{}:
-      lex.close(text, False{}, cut(a, "}}"))
+      lex.close(text, False{}, cut(a, c))
 
-def lex.after(p: String & Maybe<&2, String>) -> Lex:
+def lex.after(p: String & Maybe<&2, String>, +c: String) -> Lex:
   (text, after) = p
   match after:
     case None{}:
       LEnd{text}
     case Some{+a}:
-      lex.open(String.starts_with(a, "{"), text, a)
+      lex.open(String.starts_with(a, "{"), text, a, c)
 
-# The text up to the next tag, the tag, and the rest.
-def lex(+src: String) -> Lex:
-  lex.after(cut(src, "{{"))
+# The text up to the next tag between delimiters o and c, the tag, and the rest.
+def lex(+o: String, +c: String, +src: String) -> Lex:
+  lex.after(cut(src, o), c)
 
-# Every lex step eats a char, so length + 1 steps are enough. Texts and tags alternate.
-def toks.go(f: Nat, l: Lex, acc: List<&2, Tok>) -> Result<&2, &2, String, List<&2, Tok>>:
+def lex.with(d: Tok, +src: String) -> Lex:
+  match d:
+    case TDelim{o, c}:
+      lex(o, c, src)
+    case _:
+      lex("{{", "}}", src)
+
+def delims(t: Tok, d: Tok) -> Tok:
+  match t:
+    case TDelim{o, c}:
+      TDelim{o, c}
+    case _:
+      d
+
+# Every lex step eats a char, so length + 1 steps are enough. Texts and tags alternate. d is the TDelim in force.
+def toks.go(f: Nat, l: Lex, acc: List<&2, Tok>, d: Tok) -> Result<&2, &2, String, List<&2, Tok>>:
   match f:
     case 0n:
       Fail{"template too long"}
@@ -146,8 +185,9 @@ def toks.go(f: Nat, l: Lex, acc: List<&2, Tok>) -> Result<&2, &2, String, List<&
           Done{List.reverse(&2, Tok, TText{text} <> acc)}
         case LErr{m}:
           Fail{m}
-        case LTag{text, tag, rest}:
-          toks.go(g, lex(rest), tag <> TText{text} <> acc)
+        case LTag{text, +tag, rest}:
+          +e = delims(tag, d)
+          toks.go(g, lex.with(e, rest), tag <> TText{text} <> acc, e)
 
 def blank(+c: U32) -> Bool:
   Bool.or(U32.is_eq(c, 32), U32.is_eq(c, 9))
@@ -196,6 +236,8 @@ def std.kind(t: Tok) -> Bool:
       True{}
     case TSkip{}:
       True{}
+    case TDelim{o, c}:
+      True{}
     case _:
       False{}
 
@@ -208,7 +250,7 @@ def std.go(toks: List<&2, Tok>, +orig: String, first: Bool, +cur: String, out: L
     case _:
       List.reverse(&2, Tok, TText{cur} <> out)
 
-# A section, inverted, close, or comment tag alone on its line takes the line with it.
+# A section, inverted, close, comment, or set-delimiter tag alone on its line takes the line with it.
 def std(toks: List<&2, Tok>) -> List<&2, Tok>:
   match toks:
     case Con{TText{+t0}, rest}:
@@ -265,6 +307,8 @@ def step(st: St, t: Tok) -> St:
           close.of(n, top, stack)
         case TSkip{}:
           SOk{top, stack}
+        case TDelim{o, c}:
+          SOk{top, stack}
         case TBad{m}:
           SErr{m}
 
@@ -293,9 +337,9 @@ def parse.tree(r: Result<&2, &2, String, List<&2, Tok>>) -> Result<&2, &2, Strin
     case Done{toks}:
       tree.fin(tree.go(std(toks), SOk{Frame{"", False{}, Nil{}}, Nil{}}))
 
-# The template as nodes, or Fail with why it is malformed. Partials and set delimiters fail.
+# The template as nodes, or Fail with why it is malformed. Partials fail.
 def parse(+src: String) -> Result<&2, &2, String, List<&2, Node>>:
-  parse.tree(toks.go(1n+String.length(src), lex(src), Nil{}))
+  parse.tree(toks.go(1n+String.length(src), lex("{{", "}}", src), Nil{}, TDelim{"{{", "}}"}))
 
 def find.got(r: Map<&2, Value> & Value) -> Maybe<&2, Value>:
   (m, v) = r

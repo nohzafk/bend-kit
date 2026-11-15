@@ -79,3 +79,18 @@ def Laws.unclosed_tag():
 
 def Laws.partial_refused():
   {==}
+
+def Laws.delims_switch():
+  {==}
+
+def Laws.delims_back():
+  {==}
+
+def Laws.delims_triple():
+  {==}
+
+def Laws.delims_standalone():
+  {==}
+
+def Laws.delims_bad():
+  {==}
