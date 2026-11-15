@@ -8,6 +8,9 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `protobuf` 0.2.1.0: import `f64` 0.1.3.0 and `bytes` 0.3.3.0. The generator emits the same pins. No API change.
+- `http` 0.38.6.0: import `json` 0.7.2.0 and `zlib` 0.5.1.1. No API change.
+- `migrate` 0.3.1.0: import `json` 0.7.2.0. No API change.
 - `template` 0.2.0.0: support partials. `render_with` takes a map of parsed partials; a standalone partial tag indents the partial, and nesting stops at 64 levels. `Node` gains `NPart`, so a match over `Node` needs a new arm. All 12 tests of the spec's partials file pass, as do the two partial tests in its delimiters file. Breaking.
 - `markdown` 0.2.0.0: add `to_html_safe` for untrusted input. It renders as cmark does without `--unsafe`: raw HTML becomes `<!-- raw HTML omitted -->`, and a `javascript:`, `vbscript:`, `file:`, or non-image `data:` URL becomes empty. It matches cmark 0.31.2 on all 652 spec inputs. `render` takes the safe flag first. Breaking.
 - `template` 0.1.1.0: support set-delimiter tags such as `{{=<% %>=}}`. The 12 delimiters tests of the Mustache spec that use no partials pass.
