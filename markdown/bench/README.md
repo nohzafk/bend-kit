@@ -27,15 +27,17 @@ Each program prints FNV-1a over one output and the summed length. The checksum i
 
 ## Results
 
-M4 Pro, macOS 26.6.2, 2026-11-13. Bend 2.0.38, Apple clang 17.0.0, rustc 1.91.0, Bun 1.4.4, Node 24.0.1, Python 3.14.6. Median of three runs. Times are in ms for 10 renders; `Nx` is the multiple of the fastest variant.
+M4 Pro, macOS 26.7.2, 2026-11-15. Bend 2.0.38, Apple clang 17.0.0, rustc 1.91.0, Bun 1.4.4, Node 24.0.1, Python 3.14.6. Median of five runs. Times are in ms for 10 renders; `Nx` is the multiple of the fastest variant.
 
 | op | C | Rust | Bun | Node | Python | Bend |
 |---|---:|---:|---:|---:|---:|---:|
-| render | 5.6 (2.3x) | 2.4 (1.0x) | 21.2 (8.9x) | 21.8 (9.1x) | 237.2 (99.4x) | 311.8 (130.7x) |
+| render | 5.7 (2.4x) | 2.3 (1.0x) | 21.3 (9.1x) | 22.0 (9.5x) | 239.1 (102.8x) | 135.2 (58.2x) |
+
+Bend took 311.8 ms on 2026-11-13. `Bool.pick` evaluates both of its branches, so the block parser built every candidate block for each line, and the HTML escape built four escaped tails for each code point. `markdown` 0.3.1.0 takes those branches through `when`, which evaluates only the chosen one. Block parsing fell from 171 ms to 85 ms, and escaping the whole document from 81 ms to 7 ms.
 
 ## Caveats
 
 - Bend reads and writes `String`, a list with one cell per code point. The others read flat buffers.
-- Bend splits the input into lines, then walks each line several times: once per open container and once per block start it tries.
+- Bend splits the input into lines, then walks each line once per open container and once per block start it tries.
 - Bend times itself with `Time.mono`, a nanosecond clock.
 - One machine, one thread.
