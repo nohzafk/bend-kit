@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `runner` 0.15.0.0: import `hairpin` 0.14.1.0, `http` 0.38.6.0, `journal` 0.3.1.1, and `webhooks` 0.12.0.0. A job that hands `Hairpin.outcome` to runner gets `Retry.Rejected` for a 4xx. Breaking.
 - `jwt` 0.12.0.0, `oauth2` 0.12.0.0: import `hairpin` 0.14.1.0, `http` 0.38.6.0, and `json` 0.7.2.0. The hairpin and http types change, so this is breaking for callers that pass them.
 - `llm` 0.14.0.0: import `hairpin` 0.14.1.0, `http` 0.38.6.0, `json` 0.7.2.0, and `retry` 0.3.0.0. A match on `Retry.Outcome` needs a `Rejected` case. Breaking.
 - `sigv4` 0.12.0.0, `webhooks` 0.12.0.0: import `hairpin` 0.14.1.0, `http` 0.38.6.0, and `retry` 0.3.0.0. A match on `Retry.Outcome` needs a `Rejected` case. Breaking.
