@@ -1727,27 +1727,53 @@ def auto.email(+t: String) -> Maybe<&2, Got>:
   +rest = String.drop(a, Nat.add(1n, String.length(dom)))
   Bool.pick(Maybe<&2, Got>, Bool.not(String.is_empty(local)) && eq(hd(a), 64) && dom_ok(dom) && eq(hd(rest), 62), Some{Got{local ++ "@" ++ dom, String.drop(rest, 1n)}}, None{})
 
-def lt.html(m: Maybe<&2, String>, +s: String, +buf: String, out: List<&2, Inl>) -> Is:
+def url.has.of(m: Maybe<&2, String>) -> Bool:
+  match m:
+    case None{}:
+      False{}
+    case Some{r}:
+      True{}
+
+def url.has(+p: String, +s: String) -> Bool:
+  url.has.of(lit_ci(p, s))
+
+# cmark's unsafe schemes. A data: image in PNG, GIF, JPEG, or WebP is safe.
+def url.bad(+s: String) -> Bool:
+  +img = url.has("data:image/png", s) || url.has("data:image/gif", s) || url.has("data:image/jpeg", s) || url.has("data:image/webp", s)
+  Bool.not(img) && (url.has("javascript:", s) || url.has("vbscript:", s) || url.has("file:", s) || url.has("data:", s))
+
+# An href or src value. In safe mode an unsafe URL becomes empty.
+def url(safe: Bool, +s: String) -> String:
+  match safe:
+    case False{}:
+      href(s)
+    case True{}:
+      href(Bool.pick(String, url.bad(s), SNil{}, s))
+
+def raw_or_omit(safe: Bool, +raw: String) -> String:
+  Bool.pick(String, safe, "<!-- raw HTML omitted -->", raw)
+
+def lt.html(m: Maybe<&2, String>, +s: String, +buf: String, out: List<&2, Inl>, +safe: Bool) -> Is:
   match m:
     case None{}:
       Is{String.drop(s, 1n), 60, SCon{'<', buf}, out}
     case Some{+rest}:
       +raw = String.take(s, Nat.sub(String.length(s), String.length(rest)))
-      Is{rest, 62, SNil{}, IHtml{raw, raw} <> flush(buf, out)}
+      Is{rest, 62, SNil{}, IHtml{raw_or_omit(safe, raw), raw} <> flush(buf, out)}
 
-def lt.email(m: Maybe<&2, Got>, +s: String, +buf: String, out: List<&2, Inl>) -> Is:
+def lt.email(m: Maybe<&2, Got>, +s: String, +buf: String, out: List<&2, Inl>, +safe: Bool) -> Is:
   match m:
     case Some{Got{+v, rest}}:
       Is{rest, 62, SNil{}, IHtml{"<a href=\"mailto:" ++ href(v) ++ "\">" ++ esc(v) ++ "</a>", v} <> flush(buf, out)}
     case None{}:
-      lt.html(raw_html(s), s, buf, out)
+      lt.html(raw_html(s), s, buf, out, safe)
 
-def lt.uri(m: Maybe<&2, Got>, +s: String, +buf: String, out: List<&2, Inl>) -> Is:
+def lt.uri(m: Maybe<&2, Got>, +s: String, +buf: String, out: List<&2, Inl>, +safe: Bool) -> Is:
   match m:
     case Some{Got{+v, rest}}:
-      Is{rest, 62, SNil{}, IHtml{"<a href=\"" ++ href(v) ++ "\">" ++ esc(v) ++ "</a>", v} <> flush(buf, out)}
+      Is{rest, 62, SNil{}, IHtml{"<a href=\"" ++ url(safe, v) ++ "\">" ++ esc(v) ++ "</a>", v} <> flush(buf, out)}
     case None{}:
-      lt.email(auto.email(String.drop(s, 1n)), s, buf, out)
+      lt.email(auto.email(String.drop(s, 1n)), s, buf, out, safe)
 
 def amp.got(m: Maybe<&2, Got>, +t: String, buf: String, out: List<&2, Inl>) -> Is:
   match m:
@@ -1884,12 +1910,12 @@ def title_attr(m: Maybe<&2, String>) -> String:
     case Some{t}:
       " title=\"" ++ esc(t) ++ "\""
 
-def link.make(lt: Lt, xs: List<&2, Inl>, +img: Bool, +below: List<&2, Inl>) -> Is:
+def link.make(lt: Lt, xs: List<&2, Inl>, +img: Bool, +below: List<&2, Inl>, +safe: Bool) -> Is:
   match lt:
     case Lt{d, +t, +rest}:
       +ys = emph(xs)
       +plain = p.inl(ys)
-      +u = href(d)
+      +u = url(safe, d)
       Bool.pick(Is, img,
         Is{rest, 93, SNil{}, IHtml{"<img src=\"" ++ u ++ "\" alt=\"" ++ esc(plain) ++ "\"" ++ title_attr(t) ++ " />", plain} <> below},
         Is{rest, 93, SNil{}, IHtml{"<a href=\"" ++ u ++ "\"" ++ title_attr(t) ++ ">" ++ r.inl(ys) ++ "</a>", plain} <> deact(below)})
@@ -1897,14 +1923,14 @@ def link.make(lt: Lt, xs: List<&2, Inl>, +img: Bool, +below: List<&2, Inl>) -> I
 def link.fail(above: List<&2, Inl>, +img: Bool, below: List<&2, Inl>, +t: String) -> Is:
   Is{t, 93, SCon{']', SNil{}}, List.append(&2, Inl, List.reverse(&2, Inl, above), IText{Bool.pick(String, img, "![", "[")} <> below)}
 
-def link.try(m: Maybe<&2, Lt>, above: List<&2, Inl>, +img: Bool, below: List<&2, Inl>, +t: String) -> Is:
+def link.try(m: Maybe<&2, Lt>, above: List<&2, Inl>, +img: Bool, below: List<&2, Inl>, +t: String, +safe: Bool) -> Is:
   match m:
     case Some{lt}:
-      link.make(lt, above, img, below)
+      link.make(lt, above, img, below, safe)
     case None{}:
       link.fail(above, img, below, t)
 
-def close.br(m: Maybe<&2, Bk>, +t: String, +out: List<&2, Inl>, +refs: List<&2, Ref>) -> Is:
+def close.br(m: Maybe<&2, Bk>, +t: String, +out: List<&2, Inl>, +refs: List<&2, Ref>, +safe: Bool) -> Is:
   match m:
     case None{}:
       Is{t, 93, SCon{']', SNil{}}, out}
@@ -1914,7 +1940,7 @@ def close.br(m: Maybe<&2, Bk>, +t: String, +out: List<&2, Inl>, +refs: List<&2, 
           link.fail(above, img, below, t)
         case True{}:
           +raw = String.take(after, Nat.sub(Nat.sub(String.length(after), String.length(t)), 1n))
-          link.try(lt_or(inl.tail(t), ref.tail(t, raw, refs)), above, img, below, t)
+          link.try(lt_or(inl.tail(t), ref.tail(t, raw, refs)), above, img, below, t, safe)
 
 # ---- the scanner loop
 
@@ -1941,7 +1967,7 @@ def ic(+c: U32, +nx: U32) -> Ic:
                 Bool.pick(Ic, eq(c, 38), IcAmp{},
                   Bool.pick(Ic, eq(c, 10), IcNl{}, IcOther{})))))))))
 
-def istep(k: Ic, +y: U32, +t: String, +prev: U32, +buf: String, +out: List<&2, Inl>, +refs: List<&2, Ref>) -> Is:
+def istep(k: Ic, +y: U32, +t: String, +prev: U32, +buf: String, +out: List<&2, Inl>, +refs: List<&2, Ref>, +safe: Bool) -> Is:
   match k:
     case IcOther{}:
       Is{t, y, SCon{Chr{y}, buf}, out}
@@ -1956,15 +1982,15 @@ def istep(k: Ic, +y: U32, +t: String, +prev: U32, +buf: String, +out: List<&2, I
     case IcBang{}:
       Is{String.drop(t, 1n), 91, SNil{}, IBrack{True{}, True{}, String.drop(t, 1n)} <> flush(buf, out)}
     case IcClose{}:
-      close.br(brk(flush(buf, out), Nil{}), t, flush(buf, out), refs)
+      close.br(brk(flush(buf, out), Nil{}), t, flush(buf, out), refs, safe)
     case IcLt{}:
-      lt.uri(auto.uri(t), SCon{Chr{y}, t}, buf, out)
+      lt.uri(auto.uri(t), SCon{Chr{y}, t}, buf, out, safe)
     case IcAmp{}:
       amp.got(ent(t), t, buf, out)
     case IcNl{}:
       nl(t, buf, out)
 
-def inl.go(f: Nat, st: Is, +refs: List<&2, Ref>) -> List<&2, Inl>:
+def inl.go(f: Nat, st: Is, +refs: List<&2, Ref>, +safe: Bool) -> List<&2, Inl>:
   match f:
     case 0n:
       Nil{}
@@ -1975,11 +2001,11 @@ def inl.go(f: Nat, st: Is, +refs: List<&2, Ref>) -> List<&2, Inl>:
             case SNil{}:
               List.reverse(&2, Inl, flush(buf, out))
             case SCon{Chr{+y}, +t}:
-              inl.go(g, istep(ic(y, hd(t)), y, t, prev, buf, out, refs), refs)
+              inl.go(g, istep(ic(y, hd(t)), y, t, prev, buf, out, refs, safe), refs, safe)
 
 # A paragraph or heading's text as HTML.
-def inline(+s: String, +refs: List<&2, Ref>) -> String:
-  r.inl(emph(inl.go(Nat.add(String.length(s), 2n), Is{s, 10, SNil{}, Nil{}}, refs)))
+def inline(+s: String, +refs: List<&2, Ref>, +safe: Bool) -> String:
+  r.inl(emph(inl.go(Nat.add(String.length(s), 2n), Is{s, 10, SNil{}, Nil{}}, refs, safe)))
 
 # ---- HTML
 
@@ -1997,32 +2023,36 @@ def list_open(+ord: Bool, +start: U32) -> String:
   Bool.pick(String, ord, Bool.pick(String, eq(start, 1), "<ol>\n", "<ol start=\"" ++ U32.show(start) ++ "\">\n"), "<ul>\n")
 
 # out is reversed. tight: these kids are the children of an item in a tight list.
-def r.go(ks: List<&2, Kid>, +tight: Bool, +refs: List<&2, Ref>, +out: String) -> String:
+def r.go(ks: List<&2, Kid>, +tight: Bool, +refs: List<&2, Ref>, +safe: Bool, +out: String) -> String:
   match ks:
     case Nil{}:
       out
     case Con{Kid{l, BPara{t}}, rest}:
-      +h = inline(t, refs)
-      r.go(rest, tight, refs, Bool.pick(String, tight, put(h, out), put("</p>\n", put(h, put("<p>", cr(out))))))
+      +h = inline(t, refs, safe)
+      r.go(rest, tight, refs, safe, Bool.pick(String, tight, put(h, out), put("</p>\n", put(h, put("<p>", cr(out))))))
     case Con{Kid{l, BHead{+lv, t}}, rest}:
-      r.go(rest, tight, refs, put(">\n", put(U32.show(lv), put("</h", put(inline(t, refs), put(">", put(U32.show(lv), put("<h", cr(out)))))))))
+      r.go(rest, tight, refs, safe, put(">\n", put(U32.show(lv), put("</h", put(inline(t, refs, safe), put(">", put(U32.show(lv), put("<h", cr(out)))))))))
     case Con{Kid{l, BCode{info, t}}, rest}:
-      r.go(rest, tight, refs, put("</code></pre>\n", put(esc(t), put(code_open(info), cr(out)))))
+      r.go(rest, tight, refs, safe, put("</code></pre>\n", put(esc(t), put(code_open(info), cr(out)))))
     case Con{Kid{l, BHtml{t}}, rest}:
-      r.go(rest, tight, refs, cr(put(t, cr(out))))
+      r.go(rest, tight, refs, safe, cr(put(raw_or_omit(safe, t), cr(out))))
     case Con{Kid{l, BRule{}}, rest}:
-      r.go(rest, tight, refs, put("<hr />\n", cr(out)))
+      r.go(rest, tight, refs, safe, put("<hr />\n", cr(out)))
     case Con{Kid{l, BQuote{inner}}, rest}:
-      r.go(rest, tight, refs, put("</blockquote>\n", cr(r.go(inner, False{}, refs, put("<blockquote>\n", cr(out))))))
+      r.go(rest, tight, refs, safe, put("</blockquote>\n", cr(r.go(inner, False{}, refs, safe, put("<blockquote>\n", cr(out))))))
     case Con{Kid{l, BList{+ord, start, lt, items}}, rest}:
-      r.go(rest, tight, refs, put(Bool.pick(String, ord, "</ol>\n", "</ul>\n"), r.go(items, lt, refs, put(list_open(ord, start), cr(out)))))
+      r.go(rest, tight, refs, safe, put(Bool.pick(String, ord, "</ol>\n", "</ul>\n"), r.go(items, lt, refs, safe, put(list_open(ord, start), cr(out)))))
     case Con{Kid{l, BItem{k, s, inner}}, rest}:
-      r.go(rest, tight, refs, put("</li>\n", r.go(inner, tight, refs, put("<li>", cr(out)))))
+      r.go(rest, tight, refs, safe, put("</li>\n", r.go(inner, tight, refs, safe, put("<li>", cr(out)))))
 
-def render(r: List<&2, Kid> & List<&2, Ref>) -> String:
+def render(+safe: Bool, r: List<&2, Kid> & List<&2, Ref>) -> String:
   (ks, refs) = r
-  String.reverse(r.go(ks, False{}, refs, SNil{}))
+  String.reverse(r.go(ks, False{}, refs, safe, SNil{}))
 
-# CommonMark to HTML.
+# CommonMark to HTML. Raw HTML and every URL pass through, as the spec requires.
 def to_html(s: String) -> String:
-  render(blocks(s))
+  render(False{}, blocks(s))
+
+# CommonMark to HTML for untrusted input, as cmark renders without --unsafe: raw HTML becomes a comment, and a javascript:, vbscript:, file:, or data: URL becomes empty.
+def to_html_safe(s: String) -> String:
+  render(True{}, blocks(s))

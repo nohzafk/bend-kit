@@ -2,6 +2,27 @@ import Base
 import ./markdown.bend as M
 import ./LAWS.bend as Laws
 
+def Laws.safe_html_block():
+  {==}
+
+def Laws.safe_inline_html():
+  {==}
+
+def Laws.safe_javascript_link():
+  {==}
+
+def Laws.safe_autolink():
+  {==}
+
+def Laws.safe_data_png_kept():
+  {==}
+
+def Laws.safe_data_other():
+  {==}
+
+def Laws.safe_plain_link_kept():
+  {==}
+
 def Laws.escape_text():
   {==}
 
