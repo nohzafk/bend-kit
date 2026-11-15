@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the Mustache spec (interpolation, sections, inverted, comments, delimiters) against template.bend in a native build."""
+"""Run the Mustache spec (interpolation, sections, inverted, comments, delimiters, partials) against template.bend in a native build."""
 import json
 import os
 import subprocess
@@ -10,7 +10,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "out"
 SPEC = "https://raw.githubusercontent.com/mustache/spec/v1.4.2/specs/{}.json"
-FILES = ["interpolation", "sections", "inverted", "comments", "delimiters"]
+FILES = ["interpolation", "sections", "inverted", "comments", "delimiters", "partials"]
 END = "\x01END\x01"
 
 
@@ -43,18 +43,32 @@ def obj(d):
 
 
 def skip(t):
-    return "partials" in t or not isinstance(t["data"], dict)
+    return not isinstance(t["data"], dict)
+
+
+def parts(ps):
+    m = "Map.new(&2, List<&2, T.Node>)"
+    for k, v in ps.items():
+        m = f"Map.set(&2, List<&2, T.Node>, {m}, {lit(k)}, nodes(T.parse({lit(v)})))"
+    return m
 
 
 HEAD = """import Base
 import ../template.bend as T
 
-def out(r: Result<&2, &2, String, String>) -> String:
+def nodes(r: Result<&2, &2, String, List<&2, T.Node>>) -> List<&2, T.Node>:
+  match r:
+    case Fail{m}:
+      [T.NText{"PARTIAL FAIL " ++ m}]
+    case Done{n}:
+      n
+
+def out(r: Result<&2, &2, String, List<&2, T.Node>>, ctx: Map<&2, T.Value>, ps: Map<&2, List<&2, T.Node>>) -> String:
   match r:
     case Fail{m}:
       "FAIL " ++ m
-    case Done{s}:
-      s
+    case Done{n}:
+      T.render_with(n, ctx, ps)
 
 """
 
@@ -66,7 +80,7 @@ def main():
         for t in json.load(urllib.request.urlopen(SPEC.format(f)))["tests"]:
             if not skip(t):
                 cases.append((f, t))
-    body = "".join(f"def c{i}() -> String:\n  out(T.render_text({lit(t['template'])}, {obj(t['data'])}))\n\n" for i, (_, t) in enumerate(cases))
+    body = "".join(f"def c{i}() -> String:\n  out(T.parse({lit(t['template'])}), {obj(t['data'])}, {parts(t.get('partials', {}))})\n\n" for i, (_, t) in enumerate(cases))
     main = "def main() -> IO(Unit):\n  do IO<Unit>:\n" + "".join(f"    IO.print(c{i}() ++ {lit(END)})\n" for i in range(len(cases)))
     (OUT / "conformance.bend").write_text(HEAD + body + main)
     env = {**os.environ, "BEND_NO_TELEMETRY": "1"}

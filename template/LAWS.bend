@@ -14,6 +14,32 @@ def ctx() -> Map<&2, T.Value>:
 def run(src: String) -> Result<&2, &2, String, String>:
   T.render_text(src, ctx())
 
+def nodes(r: Result<&2, &2, String, List<&2, T.Node>>) -> List<&2, T.Node>:
+  match r:
+    case Fail{m}:
+      Nil{}
+    case Done{n}:
+      n
+
+def part(m: Map<&2, List<&2, T.Node>>, k: String, src: String) -> Map<&2, List<&2, T.Node>>:
+  Map.set(&2, List<&2, T.Node>, m, k, nodes(T.parse(src)))
+
+def parts() -> Map<&2, List<&2, T.Node>>:
+  p0 = part(Map.new(&2, List<&2, T.Node>), "row", "<li>{{.}}</li>\n")
+  p1 = part(p0, "user", "id={{id}}")
+  p2 = part(p1, "box", "<li>\n{{user.id}}\n</li>\n")
+  part(p2, "self", "x{{>self}}")
+
+def runp.of(r: Result<&2, &2, String, List<&2, T.Node>>) -> Result<&2, &2, String, String>:
+  match r:
+    case Fail{m}:
+      Fail{m}
+    case Done{n}:
+      Done{T.render_with(n, ctx(), parts())}
+
+def runp(src: String) -> Result<&2, &2, String, String>:
+  runp.of(T.parse(src))
+
 law escape_lt:
   {T.escape("<") == "&lt;" : String}
 
@@ -90,8 +116,26 @@ law mismatched_close:
 law unclosed_tag:
   {run("a {{name") == Fail{"unclosed tag"} : Result<&2, &2, String, String>}
 
-law partial_refused:
-  {run("{{> part}}") == Fail{"partials are not supported"} : Result<&2, &2, String, String>}
+law partial_without_map:
+  {run("a{{> part}}b") == Done{"ab"} : Result<&2, &2, String, String>}
+
+law partial_missing:
+  {runp("[{{>nope}}]") == Done{"[]"} : Result<&2, &2, String, String>}
+
+law partial_caller_context:
+  {runp("{{#user}}<{{>user}}>{{/user}}") == Done{"<id=7>"} : Result<&2, &2, String, String>}
+
+law partial_in_loop:
+  {runp("<ul>\n{{#items}}\n{{>row}}\n{{/items}}\n</ul>\n") == Done{"<ul>\n<li>a</li>\n<li>b</li>\n<li>c</li>\n</ul>\n"} : Result<&2, &2, String, String>}
+
+law partial_standalone_indent:
+  {runp("<ul>\n  {{>box}}\n</ul>\n") == Done{"<ul>\n  <li>\n  7\n  </li>\n</ul>\n"} : Result<&2, &2, String, String>}
+
+law partial_recursion_capped:
+  {runp("{{>self}}") == Done{String.repeat("x", 64n)} : Result<&2, &2, String, String>}
+
+law partial_default_delims:
+  {runp("{{=<% %>=}}<%>user%>") == Done{"id="} : Result<&2, &2, String, String>}
 
 law delims_switch:
   {run("{{=<% %>=}}<%#items%>(<%.%>)<%/items%>{{x}}") == Done{"(a)(b)(c){{x}}"} : Result<&2, &2, String, String>}

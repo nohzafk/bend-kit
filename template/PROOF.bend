@@ -77,7 +77,25 @@ def Laws.mismatched_close():
 def Laws.unclosed_tag():
   {==}
 
-def Laws.partial_refused():
+def Laws.partial_without_map():
+  {==}
+
+def Laws.partial_missing():
+  {==}
+
+def Laws.partial_caller_context():
+  {==}
+
+def Laws.partial_in_loop():
+  {==}
+
+def Laws.partial_standalone_indent():
+  {==}
+
+def Laws.partial_recursion_capped():
+  {==}
+
+def Laws.partial_default_delims():
   {==}
 
 def Laws.delims_switch():

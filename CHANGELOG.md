@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `template` 0.2.0.0: support partials. `render_with` takes a map of parsed partials; a standalone partial tag indents the partial, and nesting stops at 64 levels. `Node` gains `NPart`, so a match over `Node` needs a new arm. All 12 tests of the spec's partials file pass, as do the two partial tests in its delimiters file. Breaking.
 - `markdown` 0.2.0.0: add `to_html_safe` for untrusted input. It renders as cmark does without `--unsafe`: raw HTML becomes `<!-- raw HTML omitted -->`, and a `javascript:`, `vbscript:`, `file:`, or non-image `data:` URL becomes empty. It matches cmark 0.31.2 on all 652 spec inputs. `render` takes the safe flag first. Breaking.
 - `template` 0.1.1.0: support set-delimiter tags such as `{{=<% %>=}}`. The 12 delimiters tests of the Mustache spec that use no partials pass.
 - `process` 0.5.0.1: reject `wait` PIDs outside 1..2147483647 before signed conversion or host waiting. Zero and wrapped negative selectors fail with `EINVAL`, without reaping another child. No new API.

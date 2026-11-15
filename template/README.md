@@ -3,7 +3,7 @@
 Mustache templates: variables, sections, inverted sections, and comments. A variable is HTML-escaped unless you ask for raw output.
 
 ```bend
-import bend-kit-template@0.1.1.0/template.bend as T
+import bend-kit-template@0.2.0.0/template.bend as T
 ```
 
 ```bend
@@ -37,20 +37,24 @@ The context is a Base `Map<&2, T.Value>`. A `Value` is `VStr`, `VBool`, `VList`,
 | `{{! text }}` | Nothing. |
 | `{{.}}` | The top of the context stack. |
 | `{{=<% %>=}}` | Nothing. The tags after it use `<%` and `%>`. The new delimiters must be two words with no whitespace between `=` and `=`. |
+| `{{> name}}` | The partial `name`, rendered against the current context stack. A missing partial prints nothing. |
 
-A name is looked up from the innermost section outward. In a dotted name such as `user.id`, only the first part searches the stack. A section, inverted, close, comment, or set-delimiter tag alone on its line removes that line. A triple tag with custom delimiters is `<%{name}%>`.
+A name is looked up from the innermost section outward. In a dotted name such as `user.id`, only the first part searches the stack. A section, inverted, close, comment, set-delimiter, or partial tag alone on its line removes that line. A triple tag with custom delimiters is `<%{name}%>`.
+
+Partials come from a `Map<&2, List<&2, Node>>` of parsed templates, passed to `render_with`. Parse each partial with `parse` and handle its `Fail`. A partial always starts with `{{` and `}}`, whatever delimiters the caller set. A standalone partial tag indents each line of the partial's template text by the whitespace before the tag; text that a value inserts is not indented. Partials nest at most 64 deep, so a partial that includes itself stops; a partial below that depth prints nothing.
 
 Escaping replaces `&`, `<`, `>`, `"`, and `'` with `&amp;`, `&lt;`, `&gt;`, `&quot;`, and `&#39;`. That makes a value safe in HTML text and in a quoted attribute. It does not make a value safe in a URL, a script, or a style.
 
 | Def | Result | Use |
 |---|---|---|
-| `parse(src: String)` | `Result<&2, &2, String, List<&2, Node>>` | Parse once. `Fail` gives the reason: an unclosed tag or section, a close tag that does not match, or an unsupported tag. |
-| `render(nodes: List<&2, Node>, ctx: Map<&2, Value>)` | `String` | Render parsed nodes. Rendering cannot fail. |
+| `parse(src: String)` | `Result<&2, &2, String, List<&2, Node>>` | Parse once. `Fail` gives the reason: an unclosed tag or section, a close tag that does not match, or bad set delimiters. |
+| `render_with(nodes: List<&2, Node>, ctx: Map<&2, Value>, partials: Map<&2, List<&2, Node>>)` | `String` | Render parsed nodes with partials. Rendering cannot fail. |
+| `render(nodes: List<&2, Node>, ctx: Map<&2, Value>)` | `String` | `render_with` and no partials. |
 | `render_text(src: String, ctx: Map<&2, Value>)` | `Result<&2, &2, String, String>` | `parse`, then `render`. |
 | `escape(s: String)` | `String` | The HTML escape that `{{name}}` uses. |
 
-Partials (`{{> name}}`) and lambdas are not supported. A template that uses partials fails to parse.
+Lambdas and dynamic partial names (`{{>*name}}`) are not supported.
 
-`python3 template/conformance.py` runs the Mustache spec v1.4.2 interpolation, sections, inverted, comments, and delimiters files in a native build. It skips the tests that use partials, or whose data is not a map. All 116 other tests pass. `LAWS.bend` holds escaping laws and a sample of those cases.
+`python3 template/conformance.py` runs the Mustache spec v1.4.2 interpolation, sections, inverted, comments, delimiters, and partials files in a native build. It skips the tests whose data is not a map. All 130 other tests pass. `LAWS.bend` holds escaping laws and a sample of those cases.
 
 `bench/README.md` compares `render` with Rust, JavaScript, and Python libraries.
