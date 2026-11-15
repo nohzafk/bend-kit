@@ -2,6 +2,60 @@ import Base
 import ./markdown.bend as M
 import ./LAWS.bend as Laws
 
+def esc.clean(
+  b1: Bool, b2: Bool, b3: Bool, b4: Bool, +c: U32, +r: String,
+  e2: {b2 == U32.is_eq(c, 60) : Bool}, e3: {b3 == U32.is_eq(c, 62) : Bool}, e4: {b4 == U32.is_eq(c, 34) : Bool},
+  ih: {Laws.clean(r) == True{} : Bool}
+) -> {Laws.clean(Bool.pick(String, b1, "&amp;" ++ r, Bool.pick(String, b2, "&lt;" ++ r, Bool.pick(String, b3, "&gt;" ++ r, Bool.pick(String, b4, "&quot;" ++ r, SCon{Chr{c}, r}))))) == True{} : Bool}:
+  match b1 b2 b3 b4:
+    case True{} _ _ _:
+      ih
+    case False{} True{} _ _:
+      ih
+    case False{} False{} True{} _:
+      ih
+    case False{} False{} False{} True{}:
+      ih
+    case False{} False{} False{} False{}:
+      %e2 : {Laws.clean.c(_, U32.is_eq(c, 62), U32.is_eq(c, 34), Laws.clean(r)) == True{} : Bool}
+      %e3 : {Laws.clean.c(False{}, _, U32.is_eq(c, 34), Laws.clean(r)) == True{} : Bool}
+      %e4 : {Laws.clean.c(False{}, False{}, _, Laws.clean(r)) == True{} : Bool}
+      ih
+
+def Laws.esc_clean(s):
+  match s:
+    case SNil{}:
+      {==}
+    case SCon{Chr{+y}, +t}:
+      esc.clean(U32.is_eq(y, 38), U32.is_eq(y, 60), U32.is_eq(y, 62), U32.is_eq(y, 34), y, M.esc(t),
+        {==}, {==}, {==}, Laws.esc_clean(t))
+
+def esc.amp(
+  b1: Bool, b2: Bool, b3: Bool, b4: Bool, +c: U32, +r: String,
+  e1: {b1 == U32.is_eq(c, 38) : Bool},
+  ih: {Laws.amp_ok(r) == True{} : Bool}
+) -> {Laws.amp_ok(Bool.pick(String, b1, "&amp;" ++ r, Bool.pick(String, b2, "&lt;" ++ r, Bool.pick(String, b3, "&gt;" ++ r, Bool.pick(String, b4, "&quot;" ++ r, SCon{Chr{c}, r}))))) == True{} : Bool}:
+  match b1 b2 b3 b4:
+    case True{} _ _ _:
+      ih
+    case False{} True{} _ _:
+      ih
+    case False{} False{} True{} _:
+      ih
+    case False{} False{} False{} True{}:
+      ih
+    case False{} False{} False{} False{}:
+      %e1 : {Laws.amp_ok.c(_, r, Laws.amp_ok(r)) == True{} : Bool}
+      ih
+
+def Laws.esc_amp_entity(s):
+  match s:
+    case SNil{}:
+      {==}
+    case SCon{Chr{+y}, +t}:
+      esc.amp(U32.is_eq(y, 38), U32.is_eq(y, 60), U32.is_eq(y, 62), U32.is_eq(y, 34), y, M.esc(t),
+        {==}, Laws.esc_amp_entity(t))
+
 def Laws.safe_html_block():
   {==}
 

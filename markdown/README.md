@@ -36,6 +36,6 @@ python3 markdown/conformance.py --safe   # to_html_safe against the cmark CLI wi
 python3 markdown/gen.py                  # rewrite entities.bend from Python's html.entities
 ```
 
-`conformance.py` downloads `spec.json` for 0.31.2 and checks all 652 examples byte for byte. With `--safe`, it compares `to_html_safe` with cmark 0.31.2 on the same 652 inputs; all match. `LAWS.bend` holds 25 spec examples, 8 escaping laws, and 7 safe-mode laws.
+`conformance.py` downloads `spec.json` for 0.31.2 and checks all 652 examples byte for byte. With `--safe`, it compares `to_html_safe` with cmark 0.31.2 on the same 652 inputs; all match. `LAWS.bend` holds 25 spec examples, 8 escaping laws, and 7 safe-mode laws. Two laws hold for every string: the text escape `esc` leaves no `<`, `>`, or `"`, and each `&` it writes starts `&amp;`, `&lt;`, `&gt;`, or `&quot;`.
 
 `bench/README.md` compares `to_html` with cmark and libraries in Rust, JavaScript, and Python.

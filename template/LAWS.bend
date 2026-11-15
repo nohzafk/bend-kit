@@ -40,6 +40,63 @@ def runp.of(r: Result<&2, &2, String, List<&2, T.Node>>) -> Result<&2, &2, Strin
 def runp(src: String) -> Result<&2, &2, String, String>:
   runp.of(T.parse(src))
 
+def clean.c(lt: Bool, gt: Bool, quot: Bool, apos: Bool, rest: Bool) -> Bool:
+  match lt:
+    case True{}:
+      False{}
+    case False{}:
+      match gt:
+        case True{}:
+          False{}
+        case False{}:
+          match quot:
+            case True{}:
+              False{}
+            case False{}:
+              match apos:
+                case True{}:
+                  False{}
+                case False{}:
+                  rest
+
+# s holds no <, >, ", or '.
+def clean(s: String) -> Bool:
+  match s:
+    case SNil{}:
+      True{}
+    case SCon{Chr{y}, t}:
+      +c = {y : U32}
+      clean.c(U32.is_eq(c, 60), U32.is_eq(c, 62), U32.is_eq(c, 34), U32.is_eq(c, 39), clean(t))
+
+def ent(+s: String) -> Bool:
+  String.starts_with(s, "amp;") || String.starts_with(s, "lt;") || String.starts_with(s, "gt;") || String.starts_with(s, "quot;") || String.starts_with(s, "#39;")
+
+def amp_ok.c(amp: Bool, +t: String, rest: Bool) -> Bool:
+  match amp:
+    case True{}:
+      Bool.and(ent(t), rest)
+    case False{}:
+      rest
+
+# Every & in s starts &amp;, &lt;, &gt;, &quot;, or &#39;.
+def amp_ok(s: String) -> Bool:
+  match s:
+    case SNil{}:
+      True{}
+    case SCon{Chr{y}, +t}:
+      +c = {y : U32}
+      amp_ok.c(U32.is_eq(c, 38), t, amp_ok(t))
+
+# For every string, escape leaves no <, >, ", or '.
+law escape_clean:
+  for s: String
+  {clean(T.escape(s)) == True{} : Bool}
+
+# For every string, each & that escape writes starts a character reference.
+law escape_amp_entity:
+  for s: String
+  {amp_ok(T.escape(s)) == True{} : Bool}
+
 law escape_lt:
   {T.escape("<") == "&lt;" : String}
 
