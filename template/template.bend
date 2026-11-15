@@ -1,4 +1,4 @@
-# Mustache templates: variables, sections, inverted sections, and comments, with HTML escaping on by default.
+# Mustache templates: variables, sections, inverted sections, comments, partials, and set delimiters, with HTML escaping on by default.
 import Base
 
 # A context value. A section repeats over a VList, hides on VBool{False{}} or an empty VList, and pushes any other value.
@@ -9,10 +9,12 @@ type Value is Data:
   VMap{m: Map<&2, Value>}
 
 # A parsed template. A path is a dotted name split at its dots; the name "." is the empty path.
+# NPart's ind is the whitespace before a standalone partial tag; it indents each line of the partial.
 type Node is Data:
   NText{s: String}
   NVar{path: List<&2, String>, raw: Bool}
   NSec{path: List<&2, String>, inv: Bool, body: List<&2, Node>}
+  NPart{name: String, ind: String}
 
 type Tok is Data:
   TText{s: String}
@@ -23,6 +25,7 @@ type Tok is Data:
   TClose{name: String}
   TSkip{}
   TDelim{open: String, close: String}
+  TPart{name: String, ind: String}
   TBad{msg: String}
 
 type Lex is Data:
@@ -113,7 +116,7 @@ def tag.sigil.set(set: Bool, +c: U32, +t: String) -> Tok:
           Bool.pick(Tok, U32.is_eq(c, 47), TClose{n},
             Bool.pick(Tok, U32.is_eq(c, 33), TSkip{},
               Bool.pick(Tok, U32.is_eq(c, 38), TRaw{n},
-                Bool.pick(Tok, U32.is_eq(c, 62), TBad{"partials are not supported"},
+                Bool.pick(Tok, U32.is_eq(c, 62), TPart{n, ""},
                   TVar{SCon{Chr{c}, t}}))))))
 
 def tag.sigil(+c: U32, +t: String) -> Tok:
@@ -238,19 +241,57 @@ def std.kind(t: Tok) -> Bool:
       True{}
     case TDelim{o, c}:
       True{}
+    case TPart{n, i}:
+      True{}
     case _:
       False{}
+
+def last_line.go(s: String, +acc: String) -> String:
+  match s:
+    case SNil{}:
+      acc
+    case SCon{Chr{y}, +t}:
+      +c = {y : U32}
+      Bool.pick(String, U32.is_eq(c, 10), acc, last_line.go(t, SCon{Chr{c}, acc}))
+
+# The text after the last LF of s.
+def last_line(s: String) -> String:
+  last_line.go(String.reverse(s), SNil{})
+
+# A partial tag takes ind as its indentation.
+def std.ind(t: Tok, +ind: String) -> Tok:
+  match t:
+    case TPart{n, i}:
+      TPart{n, ind}
+    case TText{s}:
+      TText{s}
+    case TVar{n}:
+      TVar{n}
+    case TRaw{n}:
+      TRaw{n}
+    case TOpen{n}:
+      TOpen{n}
+    case TInv{n}:
+      TInv{n}
+    case TClose{n}:
+      TClose{n}
+    case TSkip{}:
+      TSkip{}
+    case TDelim{o, c}:
+      TDelim{o, c}
+    case TBad{m}:
+      TBad{m}
 
 # orig is the text before the tag as lexed; cur is that text after its own head trim.
 def std.go(toks: List<&2, Tok>, +orig: String, first: Bool, +cur: String, out: List<&2, Tok>) -> List<&2, Tok>:
   match toks:
     case Con{+tag, Con{TText{+next}, +rest}}:
       +sa = Bool.and(std.kind(tag), Bool.and(head_ok(String.reverse(orig), first), head_ok(next, List.is_empty(&2, Tok, rest))))
-      std.go(rest, next, False{}, Bool.pick(String, sa, trim_head(next), next), tag <> TText{Bool.pick(String, sa, trim_tail(cur), cur)} <> out)
+      std.go(rest, next, False{}, Bool.pick(String, sa, trim_head(next), next), std.ind(tag, Bool.pick(String, sa, last_line(cur), "")) <> TText{Bool.pick(String, sa, trim_tail(cur), cur)} <> out)
     case _:
       List.reverse(&2, Tok, TText{cur} <> out)
 
-# A section, inverted, close, comment, or set-delimiter tag alone on its line takes the line with it.
+# A section, inverted, close, comment, set-delimiter, or partial tag alone on its line takes the line with it.
 def std(toks: List<&2, Tok>) -> List<&2, Tok>:
   match toks:
     case Con{TText{+t0}, rest}:
@@ -309,6 +350,8 @@ def step(st: St, t: Tok) -> St:
           SOk{top, stack}
         case TDelim{o, c}:
           SOk{top, stack}
+        case TPart{n, i}:
+          SOk{add(top, NPart{n, i}), stack}
         case TBad{m}:
           SErr{m}
 
@@ -337,7 +380,7 @@ def parse.tree(r: Result<&2, &2, String, List<&2, Tok>>) -> Result<&2, &2, Strin
     case Done{toks}:
       tree.fin(tree.go(std(toks), SOk{Frame{"", False{}, Nil{}}, Nil{}}))
 
-# The template as nodes, or Fail with why it is malformed. Partials fail.
+# The template as nodes, or Fail with why it is malformed.
 def parse(+src: String) -> Result<&2, &2, String, List<&2, Node>>:
   parse.tree(toks.go(1n+String.length(src), lex("{{", "}}", src), Nil{}, TDelim{"{{", "}}"}))
 
@@ -445,25 +488,57 @@ def sec.items(inv: Bool, +v: Maybe<&2, Value>) -> List<&2, Value>:
     case True{}:
       Bool.pick(List<&2, Value>, truthy(v), Nil{}, [VMap{Map.new(&2, Value)}])
 
-# iter renders nodes once per item, each pushed on the stack; otherwise it renders nodes once.
-def go(nodes: List<&2, Node>, items: List<&2, Value>, iter: Bool, +stack: List<&2, Value>) -> String:
-  match nodes items iter:
-    case +ns Con{it, +more} True{}:
-      go(ns, more, False{}, it <> stack) ++ go(ns, more, True{}, stack)
-    case ns Nil{} True{}:
-      ""
-    case Nil{} xs False{}:
-      ""
-    case Con{NText{s}, rest} +xs False{}:
-      s ++ go(rest, xs, False{}, stack)
-    case Con{NVar{p, raw}, rest} +xs False{}:
-      show(raw, lookup(p, stack)) ++ go(rest, xs, False{}, stack)
-    case Con{NSec{p, inv, body}, rest} +xs False{}:
-      go(body, sec.items(inv, lookup(p, stack)), True{}, stack) ++ go(rest, xs, False{}, stack)
+# Each LF in partial text is followed by the partial's indentation.
+def indent(ind: String, +s: String) -> String:
+  match ind:
+    case SNil{}:
+      s
+    case SCon{c, t}:
+      String.join(String.split(s, '\n'), "\n" ++ SCon{c, t})
 
-# The nodes rendered against ctx.
+# Drops the indentation that indent left after the partial's last LF.
+def undent(+ind: String, +s: String) -> String:
+  +r = String.reverse(s)
+  +rest = String.drop(r, String.length(ind))
+  +cut = String.starts_with(r, String.reverse(ind)) && (String.is_empty(rest) || String.starts_with(rest, "\n"))
+  Bool.pick(String, cut, String.reverse(rest), s)
+
+def part.got(r: Map<&2, List<&2, Node>> & List<&2, Node>) -> List<&2, Node>:
+  (m, v) = r
+  v
+
+# A missing partial renders as nothing.
+def part(+ps: Map<&2, List<&2, Node>>, +n: String) -> List<&2, Node>:
+  part.got(Map.get(List<&2, Node>, Nil{}, ps, n))
+
+# f bounds partial nesting. iter renders nodes once per item, each pushed on the stack; otherwise it renders nodes once.
+def go(f: Nat, nodes: List<&2, Node>, items: List<&2, Value>, iter: Bool, +ps: Map<&2, List<&2, Node>>, +stack: List<&2, Value>, +ind: String) -> String:
+  match f nodes items iter:
+    case +k +ns Con{it, +more} True{}:
+      go(k, ns, more, False{}, ps, it <> stack, ind) ++ go(k, ns, more, True{}, ps, stack, ind)
+    case k ns Nil{} True{}:
+      ""
+    case k Nil{} xs False{}:
+      ""
+    case +k Con{NText{s}, rest} +xs False{}:
+      indent(ind, s) ++ go(k, rest, xs, False{}, ps, stack, ind)
+    case +k Con{NVar{p, raw}, rest} +xs False{}:
+      show(raw, lookup(p, stack)) ++ go(k, rest, xs, False{}, ps, stack, ind)
+    case +k Con{NSec{p, inv, body}, rest} +xs False{}:
+      go(k, body, sec.items(inv, lookup(p, stack)), True{}, ps, stack, ind) ++ go(k, rest, xs, False{}, ps, stack, ind)
+    case 0n Con{NPart{n, pi}, rest} +xs False{}:
+      go(0n, rest, xs, False{}, ps, stack, ind)
+    case 1n+g Con{NPart{n, pi}, rest} +xs False{}:
+      +i2 = ind ++ pi
+      undent(i2, i2 ++ go(g, part(ps, n), Nil{}, False{}, ps, stack, i2)) ++ go(1n+g, rest, xs, False{}, ps, stack, ind)
+
+# The nodes rendered against ctx, with {{> name}} taken from partials. Partials nest at most 64 deep; a deeper one renders as nothing.
+def render_with(nodes: List<&2, Node>, ctx: Map<&2, Value>, partials: Map<&2, List<&2, Node>>) -> String:
+  go(64n, nodes, Nil{}, False{}, partials, [VMap{ctx}], "")
+
+# The nodes rendered against ctx. A partial renders as nothing.
 def render(nodes: List<&2, Node>, ctx: Map<&2, Value>) -> String:
-  go(nodes, Nil{}, False{}, [VMap{ctx}])
+  render_with(nodes, ctx, Map.new(&2, List<&2, Node>))
 
 def render_text.of(r: Result<&2, &2, String, List<&2, Node>>, ctx: Map<&2, Value>) -> Result<&2, &2, String, String>:
   match r:
