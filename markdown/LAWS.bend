@@ -79,6 +79,33 @@ law escape_entity_kept:
 law raw_html_kept:
   {M.to_html("<b class=\"x\">&</b>\n") == "<p><b class=\"x\">&amp;</b></p>\n" : String}
 
+def gfm(s: String) -> String:
+  M.to_html_with(M.Opts{False{}, True{}}, s)
+
+law gfm_table:
+  {gfm("| a | b |\n|:--|--:|\n| 1 < 2 & | `\\|` |\n| y |\n") == "<table>\n<thead>\n<tr>\n<th align=\"left\">a</th>\n<th align=\"right\">b</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td align=\"left\">1 &lt; 2 &amp;</td>\n<td align=\"right\"><code>|</code></td>\n</tr>\n<tr>\n<td align=\"left\">y</td>\n<td align=\"right\"></td>\n</tr>\n</tbody>\n</table>\n" : String}
+
+law gfm_table_off:
+  {M.to_html("| a |\n| - |\n") == "<p>| a |\n| - |</p>\n" : String}
+
+law gfm_task_list:
+  {gfm("- [ ] a\n- [x] b\n") == "<ul>\n<li><input disabled=\"\" type=\"checkbox\"> a</li>\n<li><input checked=\"\" disabled=\"\" type=\"checkbox\"> b</li>\n</ul>\n" : String}
+
+law gfm_strikethrough:
+  {gfm("~~a~~ ~b~ ~~~c~~~\n") == "<p><del>a</del> <del>b</del> ~~~c~~~</p>\n" : String}
+
+law gfm_strikethrough_off:
+  {M.to_html("~~a~~\n") == "<p>~~a~~</p>\n" : String}
+
+law gfm_autolink:
+  {gfm("see www.x.org/a?b=1&c=2. or a@b.co\n") == "<p>see <a href=\"http://www.x.org/a?b=1&amp;c=2\">www.x.org/a?b=1&amp;c=2</a>. or <a href=\"mailto:a@b.co\">a@b.co</a></p>\n" : String}
+
+law gfm_autolink_safe:
+  {M.to_html_with(M.Opts{True{}, True{}}, "https://x.org <b>\n") == "<p><a href=\"https://x.org\">https://x.org</a> <!-- raw HTML omitted --></p>\n" : String}
+
+law gfm_tagfilter:
+  {gfm("a <script>x</script> <b>\n") == "<p>a &lt;script>x&lt;/script> <b></p>\n" : String}
+
 law safe_html_block:
   {M.to_html_safe("<div>\nraw\n</div>\n") == "<!-- raw HTML omitted -->\n" : String}
 
