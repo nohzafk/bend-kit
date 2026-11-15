@@ -77,6 +77,30 @@ def Laws.safe_data_other():
 def Laws.safe_plain_link_kept():
   {==}
 
+def Laws.gfm_table():
+  {==}
+
+def Laws.gfm_table_off():
+  {==}
+
+def Laws.gfm_task_list():
+  {==}
+
+def Laws.gfm_strikethrough():
+  {==}
+
+def Laws.gfm_strikethrough_off():
+  {==}
+
+def Laws.gfm_autolink():
+  {==}
+
+def Laws.gfm_autolink_safe():
+  {==}
+
+def Laws.gfm_tagfilter():
+  {==}
+
 def Laws.escape_text():
   {==}
 
