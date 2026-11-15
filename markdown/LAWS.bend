@@ -1,6 +1,59 @@
 import Base
 import ./markdown.bend as M
 
+def clean.c(lt: Bool, gt: Bool, quot: Bool, rest: Bool) -> Bool:
+  match lt:
+    case True{}:
+      False{}
+    case False{}:
+      match gt:
+        case True{}:
+          False{}
+        case False{}:
+          match quot:
+            case True{}:
+              False{}
+            case False{}:
+              rest
+
+# s holds no <, >, or ".
+def clean(s: String) -> Bool:
+  match s:
+    case SNil{}:
+      True{}
+    case SCon{Chr{y}, t}:
+      +c = {y : U32}
+      clean.c(U32.is_eq(c, 60), U32.is_eq(c, 62), U32.is_eq(c, 34), clean(t))
+
+def ent(+s: String) -> Bool:
+  String.starts_with(s, "amp;") || String.starts_with(s, "lt;") || String.starts_with(s, "gt;") || String.starts_with(s, "quot;")
+
+def amp_ok.c(amp: Bool, +t: String, rest: Bool) -> Bool:
+  match amp:
+    case True{}:
+      Bool.and(ent(t), rest)
+    case False{}:
+      rest
+
+# Every & in s starts &amp;, &lt;, &gt;, or &quot;.
+def amp_ok(s: String) -> Bool:
+  match s:
+    case SNil{}:
+      True{}
+    case SCon{Chr{y}, +t}:
+      +c = {y : U32}
+      amp_ok.c(U32.is_eq(c, 38), t, amp_ok(t))
+
+# For every string, the text escape leaves no <, >, or ".
+law esc_clean:
+  for s: String
+  {clean(M.esc(s)) == True{} : Bool}
+
+# For every string, each & that the text escape writes starts a character reference.
+law esc_amp_entity:
+  for s: String
+  {amp_ok(M.esc(s)) == True{} : Bool}
+
 # HTML escaping: text, code, attributes, and URLs.
 law escape_text:
   {M.to_html("a < b & \"c\"\n") == "<p>a &lt; b &amp; &quot;c&quot;</p>\n" : String}

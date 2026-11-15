@@ -55,6 +55,6 @@ Escaping replaces `&`, `<`, `>`, `"`, and `'` with `&amp;`, `&lt;`, `&gt;`, `&qu
 
 Lambdas and dynamic partial names (`{{>*name}}`) are not supported.
 
-`python3 template/conformance.py` runs the Mustache spec v1.4.2 interpolation, sections, inverted, comments, delimiters, and partials files in a native build. It skips the tests whose data is not a map. All 130 other tests pass. `LAWS.bend` holds escaping laws and a sample of those cases.
+`python3 template/conformance.py` runs the Mustache spec v1.4.2 interpolation, sections, inverted, comments, delimiters, and partials files in a native build. It skips the tests whose data is not a map. All 130 other tests pass. `LAWS.bend` holds escaping laws and a sample of those cases. Two of its laws hold for every string: `escape` output has no `<`, `>`, `"`, or `'`, and each `&` in it starts `&amp;`, `&lt;`, `&gt;`, `&quot;`, or `&#39;`.
 
 `bench/README.md` compares `render` with Rust, JavaScript, and Python libraries.
