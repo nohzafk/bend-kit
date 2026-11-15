@@ -8,6 +8,9 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `jwt` 0.12.0.0, `oauth2` 0.12.0.0: import `hairpin` 0.14.1.0, `http` 0.38.6.0, and `json` 0.7.2.0. The hairpin and http types change, so this is breaking for callers that pass them.
+- `llm` 0.14.0.0: import `hairpin` 0.14.1.0, `http` 0.38.6.0, `json` 0.7.2.0, and `retry` 0.3.0.0. A match on `Retry.Outcome` needs a `Rejected` case. Breaking.
+- `sigv4` 0.12.0.0, `webhooks` 0.12.0.0: import `hairpin` 0.14.1.0, `http` 0.38.6.0, and `retry` 0.3.0.0. A match on `Retry.Outcome` needs a `Rejected` case. Breaking.
 - `markdown` 0.3.1.0: render 2.3 times faster. The bench takes 135.2 ms for 10 renders, down from 311.8 ms; markdown-it-py takes 239.1 ms. The block parser, the HTML escape, and the URL encoder no longer build the branch that `Bool.pick` discards. Output does not change. No API change.
 - `camber` 0.15.1.0: import `http` 0.38.6.0 and `json` 0.7.2.0. No API change.
 - `hairpin` 0.14.1.0: import `http` 0.38.6.0 and `json` 0.7.2.0. No API change.
