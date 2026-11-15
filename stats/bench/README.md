@@ -90,3 +90,7 @@ The final `python3 bench/run.py` run gives:
 | histogram | 0.171 | 0.049 | 1.530 | 0.917 | 1.181 | 0.273 |
 
 Every language retains the four checksums above. Median is about 4.3 times faster than the preceding full-sort run. Timing varies between runs; no Array-sort experiment was needed after selection improved the fixed workload.
+
+## Universal integer laws
+
+`python3 bench/run.py 1` on 2026-11-15 confirms all four checksums above in C, Rust, Bun, Node, Python, and Bend. This is one checksum run, not a new timing baseline. These float workloads do not call gcd, lcm, or integer square root; their universal proofs and existing fixtures cover the integer changes.
