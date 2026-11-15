@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `markdown` 0.3.1.0: render 2.3 times faster. The bench takes 135.2 ms for 10 renders, down from 311.8 ms; markdown-it-py takes 239.1 ms. The block parser, the HTML escape, and the URL encoder no longer build the branch that `Bool.pick` discards. Output does not change. No API change.
 - `markdown` 0.3.0.0: add the GitHub Flavored Markdown extensions behind `to_html_with(Opts{safe, gfm}, s)`: tables, task list items, strikethrough, extended autolinks, and the tag filter. All 24 extension examples of the cmark-gfm 0.29 spec pass; plain and safe output do not change. `render` takes `Opts` in place of the safe flag. Breaking.
 - `protobuf` 0.2.1.0: import `f64` 0.1.3.0 and `bytes` 0.3.3.0. The generator emits the same pins. No API change.
 - `http` 0.38.6.0: import `json` 0.7.2.0 and `zlib` 0.5.1.1. No API change.

@@ -3,6 +3,14 @@ import Base
 import bend-kit-unicode@0.1.0.0/unicode.bend as U
 import ./entities.bend as E
 
+# Bool.pick evaluates both branches; when evaluates only the chosen one.
+def when(-A: Type, c: Bool, t: Unit -> A, e: Unit -> A) -> A:
+  match c:
+    case True{}:
+      t(Unit{})
+    case False{}:
+      e(Unit{})
+
 # ---- characters
 
 # The first code point of s; 0 when s is empty.
@@ -150,17 +158,32 @@ def has_ci(s: String, +p: String) -> Bool:
 
 # ---- HTML output
 
+def esc.pick(amp: Bool, lt: Bool, gt: Bool, quot: Bool, c: Char, rest: String) -> String:
+  match amp:
+    case True{}:
+      "&amp;" ++ rest
+    case False{}:
+      match lt:
+        case True{}:
+          "&lt;" ++ rest
+        case False{}:
+          match gt:
+            case True{}:
+              "&gt;" ++ rest
+            case False{}:
+              match quot:
+                case True{}:
+                  "&quot;" ++ rest
+                case False{}:
+                  SCon{c, rest}
+
 def esc(s: String) -> String:
   match s:
     case SNil{}:
       SNil{}
     case SCon{Chr{y}, t}:
       +c = {y : U32}
-      +r = esc(t)
-      Bool.pick(String, eq(c, 38), "&amp;" ++ r,
-        Bool.pick(String, eq(c, 60), "&lt;" ++ r,
-          Bool.pick(String, eq(c, 62), "&gt;" ++ r,
-            Bool.pick(String, eq(c, 34), "&quot;" ++ r, SCon{Chr{c}, r}))))
+      esc.pick(eq(c, 38), eq(c, 60), eq(c, 62), eq(c, 34), Chr{c}, esc(t))
 
 def hexd(+n: U32) -> U32:
   Bool.pick(U32, U32.is_lt(n, 10), (n + 48 : U32), (n + 55 : U32))
@@ -170,13 +193,29 @@ def pct(+b: U32) -> String:
 
 # Each UTF-8 octet of c as %XX.
 def pct_utf8(+c: U32) -> String:
-  +b1 = pct((192 + (c >> 6n) : U32)) ++ pct((128 + (c .&. 63) : U32))
-  +b2 = pct((224 + (c >> 12n) : U32)) ++ pct((128 + ((c >> 6n) .&. 63) : U32)) ++ pct((128 + (c .&. 63) : U32))
-  +b3 = pct((240 + (c >> 18n) : U32)) ++ pct((128 + ((c >> 12n) .&. 63) : U32)) ++ pct((128 + ((c >> 6n) .&. 63) : U32)) ++ pct((128 + (c .&. 63) : U32))
-  Bool.pick(String, U32.is_lt(c, 128), pct(c), Bool.pick(String, U32.is_lt(c, 2048), b1, Bool.pick(String, U32.is_lt(c, 65536), b2, b3)))
+  when(String, U32.is_lt(c, 128), u => pct(c), u => when(String, U32.is_lt(c, 2048),
+    v => pct((192 + (c >> 6n) : U32)) ++ pct((128 + (c .&. 63) : U32)),
+    v => when(String, U32.is_lt(c, 65536),
+      w => pct((224 + (c >> 12n) : U32)) ++ pct((128 + ((c >> 6n) .&. 63) : U32)) ++ pct((128 + (c .&. 63) : U32)),
+      w => pct((240 + (c >> 18n) : U32)) ++ pct((128 + ((c >> 12n) .&. 63) : U32)) ++ pct((128 + ((c >> 6n) .&. 63) : U32)) ++ pct((128 + (c .&. 63) : U32)))))
 
 def href_safe(+c: U32) -> Bool:
   is_alnum(c) || eq(c, 33) || within(c, 35, 47) || eq(c, 58) || eq(c, 59) || eq(c, 61) || eq(c, 63) || eq(c, 64) || eq(c, 95) || eq(c, 126)
+
+def href.pick(amp: Bool, apos: Bool, safe: Bool, +c: U32, rest: String) -> String:
+  match amp:
+    case True{}:
+      "&amp;" ++ rest
+    case False{}:
+      match apos:
+        case True{}:
+          "&#x27;" ++ rest
+        case False{}:
+          match safe:
+            case True{}:
+              SCon{Chr{c}, rest}
+            case False{}:
+              pct_utf8(c) ++ rest
 
 # A URL for an href or src attribute: unsafe octets percent-encoded, & and ' as references.
 def href(s: String) -> String:
@@ -185,10 +224,7 @@ def href(s: String) -> String:
       SNil{}
     case SCon{Chr{y}, t}:
       +c = {y : U32}
-      +r = href(t)
-      Bool.pick(String, eq(c, 38), "&amp;" ++ r,
-        Bool.pick(String, eq(c, 39), "&#x27;" ++ r,
-          Bool.pick(String, href_safe(c), SCon{Chr{c}, r}, pct_utf8(c) ++ r)))
+      href.pick(eq(c, 38), eq(c, 39), href_safe(c), c, href(t))
 
 # ---- character references
 
@@ -818,7 +854,7 @@ def defs(+s: String, refs: List<&2, Ref>) -> String & List<&2, Ref>:
 
 def para.close(+llb: Bool, r: String & List<&2, Ref>, +stack: List<&2, Frame>, +line: U32) -> St:
   (+rest, refs) = r
-  St{Bool.pick(List<&2, Frame>, is_blank(rest), stack, add_kid(stack, Kid{llb, BPara{String.trim_end(rest)}})), LNone{}, refs, line}
+  St{when(List<&2, Frame>, is_blank(rest), u => stack, u => add_kid(stack, Kid{llb, BPara{String.trim_end(rest)}})), LNone{}, refs, line}
 
 def fence.body(+lines: List<&2, String>) -> String:
   Bool.pick(String, List.is_empty(&2, String, lines), "", join_rev(lines) ++ "\n")
@@ -1213,7 +1249,7 @@ def prep(p: P) -> St:
 def try.code(+p: P, c: Cx) -> Sr:
   match c:
     case Cx{+ln, at, +ind, +blank}:
-      Bool.pick(Sr, U32.is_ge(ind, 4) && Bool.not(p_tipp(p)) && Bool.not(blank), SDone{set_leaf(prep(p), LCode{False{}, [ln_s(adv(ln, 4))]})}, SStop{p})
+      when(Sr, U32.is_ge(ind, 4) && Bool.not(p_tipp(p)) && Bool.not(blank), u => SDone{set_leaf(prep(p), LCode{False{}, [ln_s(adv(ln, 4))]})}, u => SStop{p})
 
 def item.open(im: Im, +p: P, +c: Cx) -> Sr:
   match im:
@@ -1225,7 +1261,7 @@ def item.open(im: Im, +p: P, +c: Cx) -> Sr:
       +used = Bool.pick(U32, pb || U32.is_ge(cx_ind(pc), 5), 1, cx_ind(pc))
       +ok = Bool.not(p_cpara(p)) || (Bool.not(pb) && (Bool.not(is_ord(kind)) || eq(start, 1)))
       +f = {FItem{False{}, kind, start, (cx_ind(c) + w + used : U32), p_line(p), Nil{}} : Frame}
-      Bool.pick(Sr, ok, SCont{P{push_frame(prep(p), f), Bool.pick(Ln, pb, cx_at(pc), adv(post, used)), 0n, LkNone{}, p_tipp(p)}}, try.code(p, c))
+      when(Sr, ok, u => SCont{P{push_frame(prep(p), f), Bool.pick(Ln, pb, cx_at(pc), adv(post, used)), 0n, LkNone{}, p_tipp(p)}}, u => try.code(p, c))
 
 def try.item(m: Maybe<&2, Im>, +p: P, +c: Cx) -> Sr:
   match m:
@@ -1243,7 +1279,7 @@ def try.hr(ok: Bool, +p: P, +c: Cx) -> Sr:
 
 def setext.close(+lv: U32, r: String & List<&2, Ref>, +stack: List<&2, Frame>, +line: U32, +p: P) -> Sr:
   (+rest, +refs) = r
-  Bool.pick(Sr, is_blank(rest), SCont{P{St{stack, LNone{}, refs, line}, p_ln(p), 0n, LkNone{}, p_tipp(p)}}, SDone{St{add_kid(stack, Kid{False{}, BHead{lv, String.trim(rest)}}), LNone{}, refs, line}})
+  when(Sr, is_blank(rest), u => SCont{P{St{stack, LNone{}, refs, line}, p_ln(p), 0n, LkNone{}, p_tipp(p)}}, u => SDone{St{add_kid(stack, Kid{False{}, BHead{lv, String.trim(rest)}}), LNone{}, refs, line}})
 
 def setext.apply(+lv: U32, +p: P) -> Sr:
   match p:
@@ -1264,11 +1300,11 @@ def try.setext(ok: Bool, +lv: U32, +p: P, +c: Cx) -> Sr:
 def html.open(+k: U32, +p: P, +c: Cx) -> Sr:
   +s = ln_s(cx_ln(c))
   +st = set_leaf(prep(p), LHtml{k, [s]})
-  SDone{Bool.pick(St, U32.is_le(k, 5) && html_end(k, s), close_leaf(st), st)}
+  SDone{when(St, U32.is_le(k, 5) && html_end(k, s), u => close_leaf(st), u => st)}
 
 def try.html(+k: U32, +p: P, +c: Cx) -> Sr:
   +lv = setext(ln_s(cx_at(c)))
-  Bool.pick(Sr, U32.is_gt(k, 0), html.open(k, p, c), try.setext(U32.is_le(cx_ind(c), 3) && p_cpara(p) && U32.is_gt(lv, 0), lv, p, c))
+  when(Sr, U32.is_gt(k, 0), u => html.open(k, p, c), u => try.setext(U32.is_le(cx_ind(c), 3) && p_cpara(p) && U32.is_gt(lv, 0), lv, p, c))
 
 def try.fence(m: Maybe<&2, Fg>, +p: P, +c: Cx) -> Sr:
   match m:
@@ -1397,7 +1433,7 @@ def leaf_add(st: St, +s: String) -> St:
           St{stack, LFence{c, n, ind, info, s <> ls}, refs, line}
         case LHtml{+k, ls}:
           +st2 = {St{stack, LHtml{k, s <> ls}, refs, line} : St}
-          Bool.pick(St, U32.is_le(k, 5) && html_end(k, s), close_leaf(st2), st2)
+          when(St, U32.is_le(k, 5) && html_end(k, s), u => close_leaf(st2), u => st2)
         case LNone{}:
           St{stack, LPara{False{}, [s]}, refs, line}
 
@@ -1410,7 +1446,7 @@ def text.put(p: P, +c: Cx) -> St:
         case LkLeaf{}:
           leaf_llb(leaf_add(st, ln_s(ln)), cx_blank(c))
         case _:
-          Bool.pick(St, cx_blank(c), head_blank(st), reset_llb(leaf_add(st, ln_s(cx_at(c)))))
+          when(St, cx_blank(c), u => head_blank(st), u => reset_llb(leaf_add(st, ln_s(cx_at(c)))))
 
 def text.lazy(lazy: Bool, +p: P, +c: Cx) -> St:
   match lazy:
@@ -1503,7 +1539,7 @@ def clean(s: String) -> String:
       SCon{Chr{Bool.pick(U32, eq(y, 0), 65533, y)}, clean(t)}
 
 def drop_cr(+l: String) -> String:
-  Bool.pick(String, String.ends_with(l, "\r"), String.take(l, Nat.sub(String.length(l), 1n)), l)
+  when(String, String.ends_with(l, "\r"), u => String.take(l, Nat.sub(String.length(l), 1n)), u => l)
 
 def lines.go(xs: List<&2, String>) -> List<&2, String>:
   match xs:
@@ -1674,7 +1710,7 @@ def cnl(s: String) -> String:
 # Code span text: line endings as spaces, and one space stripped from each end when both ends have one.
 def cnorm(+s: String) -> String:
   +strip = String.starts_with(s, " ") && String.ends_with(s, " ") && Bool.not(String.is_empty(skip(~(c => eq(c, 32)), s)))
-  Bool.pick(String, strip, String.take(String.drop(s, 1n), Nat.sub(String.length(s), 2n)), s)
+  when(String, strip, u => String.take(String.drop(s, 1n), Nat.sub(String.length(s), 2n)), u => s)
 
 def code.got(m: Maybe<&2, Got>, +ticks: Nat, +after: String, +buf: String, out: List<&2, Inl>) -> Is:
   match m:
@@ -2071,7 +2107,7 @@ def ref.full(m: Maybe<&2, Got>, +t: String, +raw: String, +refs: List<&2, Ref>) 
     case Some{Got{lab, rest}}:
       lookup(refs, lab, rest)
     case None{}:
-      Bool.pick(Maybe<&2, Lt>, String.starts_with(t, "[]"), lookup(refs, raw, String.drop(t, 2n)), lookup(refs, raw, t))
+      when(Maybe<&2, Lt>, String.starts_with(t, "[]"), u => lookup(refs, raw, String.drop(t, 2n)), u => lookup(refs, raw, t))
 
 def ref.tail(+t: String, +raw: String, +refs: List<&2, Ref>) -> Maybe<&2, Lt>:
   ref.full(Bool.pick(Maybe<&2, Got>, eq(hd(t), 91), label(String.drop(t, 1n)), None{}), t, raw, refs)
@@ -2132,9 +2168,9 @@ def link.make(lt: Lt, xs: List<&2, Inl>, +img: Bool, +below: List<&2, Inl>, +o: 
       +ys = emph(xs)
       +plain = p.inl(ys)
       +u = url(o.safe(o), d)
-      Bool.pick(Is, img,
-        Is{rest, 93, SNil{}, IHtml{"<img src=\"" ++ u ++ "\" alt=\"" ++ esc(plain) ++ "\"" ++ title_attr(t) ++ " />", plain} <> below},
-        Is{rest, 93, SNil{}, IHtml{"<a href=\"" ++ u ++ "\"" ++ title_attr(t) ++ ">" ++ r.inl(ys) ++ "</a>", plain} <> deact(below)})
+      when(Is, img,
+        z => Is{rest, 93, SNil{}, IHtml{"<img src=\"" ++ u ++ "\" alt=\"" ++ esc(plain) ++ "\"" ++ title_attr(t) ++ " />", plain} <> below},
+        z => Is{rest, 93, SNil{}, IHtml{"<a href=\"" ++ u ++ "\"" ++ title_attr(t) ++ ">" ++ r.inl(ys) ++ "</a>", plain} <> deact(below)})
 
 def link.fail(above: List<&2, Inl>, +img: Bool, below: List<&2, Inl>, +t: String) -> Is:
   Is{t, 93, SCon{']', SNil{}}, List.append(&2, Inl, List.reverse(&2, Inl, above), IText{Bool.pick(String, img, "![", "[")} <> below)}
@@ -2332,14 +2368,14 @@ def tbl.html(+head: List<&2, String>, +aligns: List<&2, String>, +rows: List<&2,
 # A paragraph's text, after pre, in <p> unless tight.
 def r.text(+t: String, +tight: Bool, +refs: List<&2, Ref>, +o: Opts, +pre: String, +out: String) -> String:
   +h = pre ++ inline(t, refs, o)
-  Bool.pick(String, tight, put(h, out), put("</p>\n", put(h, put("<p>", cr(out)))))
+  when(String, tight, u => put(h, out), u => put("</p>\n", put(h, put("<p>", cr(out)))))
 
 def r.tbl(m: Maybe<&2, Tb>, +t: String, +tight: Bool, +refs: List<&2, Ref>, +o: Opts, +out: String) -> String:
   match m:
     case None{}:
       r.text(t, tight, refs, o, "", out)
     case Some{Tb{+before, head, aligns, rows}}:
-      +o1 = Bool.pick(String, List.is_empty(&2, String, before), out, r.text(String.join(before, "\n"), tight, refs, o, "", out))
+      +o1 = when(String, List.is_empty(&2, String, before), u => out, u => r.text(String.join(before, "\n"), tight, refs, o, "", out))
       put(tbl.html(head, aligns, rows, refs, o), cr(o1))
 
 def r.para(gfm: Bool, +t: String, +tight: Bool, +refs: List<&2, Ref>, +o: Opts, +out: String) -> String:
