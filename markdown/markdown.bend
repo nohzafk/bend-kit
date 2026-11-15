@@ -3,6 +3,14 @@ import Base
 import bend-kit-unicode@0.1.0.0/unicode.bend as U
 import ./entities.bend as E
 
+# Bool.pick evaluates both branches; when evaluates only the chosen one.
+def when(-A: Type, c: Bool, t: Unit -> A, e: Unit -> A) -> A:
+  match c:
+    case True{}:
+      t(Unit{})
+    case False{}:
+      e(Unit{})
+
 # ---- characters
 
 # The first code point of s; 0 when s is empty.
@@ -150,17 +158,32 @@ def has_ci(s: String, +p: String) -> Bool:
 
 # ---- HTML output
 
+def esc.pick(amp: Bool, lt: Bool, gt: Bool, quot: Bool, c: Char, rest: String) -> String:
+  match amp:
+    case True{}:
+      "&amp;" ++ rest
+    case False{}:
+      match lt:
+        case True{}:
+          "&lt;" ++ rest
+        case False{}:
+          match gt:
+            case True{}:
+              "&gt;" ++ rest
+            case False{}:
+              match quot:
+                case True{}:
+                  "&quot;" ++ rest
+                case False{}:
+                  SCon{c, rest}
+
 def esc(s: String) -> String:
   match s:
     case SNil{}:
       SNil{}
     case SCon{Chr{y}, t}:
       +c = {y : U32}
-      +r = esc(t)
-      Bool.pick(String, eq(c, 38), "&amp;" ++ r,
-        Bool.pick(String, eq(c, 60), "&lt;" ++ r,
-          Bool.pick(String, eq(c, 62), "&gt;" ++ r,
-            Bool.pick(String, eq(c, 34), "&quot;" ++ r, SCon{Chr{c}, r}))))
+      esc.pick(eq(c, 38), eq(c, 60), eq(c, 62), eq(c, 34), Chr{c}, esc(t))
 
 def hexd(+n: U32) -> U32:
   Bool.pick(U32, U32.is_lt(n, 10), (n + 48 : U32), (n + 55 : U32))
@@ -170,13 +193,29 @@ def pct(+b: U32) -> String:
 
 # Each UTF-8 octet of c as %XX.
 def pct_utf8(+c: U32) -> String:
-  +b1 = pct((192 + (c >> 6n) : U32)) ++ pct((128 + (c .&. 63) : U32))
-  +b2 = pct((224 + (c >> 12n) : U32)) ++ pct((128 + ((c >> 6n) .&. 63) : U32)) ++ pct((128 + (c .&. 63) : U32))
-  +b3 = pct((240 + (c >> 18n) : U32)) ++ pct((128 + ((c >> 12n) .&. 63) : U32)) ++ pct((128 + ((c >> 6n) .&. 63) : U32)) ++ pct((128 + (c .&. 63) : U32))
-  Bool.pick(String, U32.is_lt(c, 128), pct(c), Bool.pick(String, U32.is_lt(c, 2048), b1, Bool.pick(String, U32.is_lt(c, 65536), b2, b3)))
+  when(String, U32.is_lt(c, 128), u => pct(c), u => when(String, U32.is_lt(c, 2048),
+    v => pct((192 + (c >> 6n) : U32)) ++ pct((128 + (c .&. 63) : U32)),
+    v => when(String, U32.is_lt(c, 65536),
+      w => pct((224 + (c >> 12n) : U32)) ++ pct((128 + ((c >> 6n) .&. 63) : U32)) ++ pct((128 + (c .&. 63) : U32)),
+      w => pct((240 + (c >> 18n) : U32)) ++ pct((128 + ((c >> 12n) .&. 63) : U32)) ++ pct((128 + ((c >> 6n) .&. 63) : U32)) ++ pct((128 + (c .&. 63) : U32)))))
 
 def href_safe(+c: U32) -> Bool:
   is_alnum(c) || eq(c, 33) || within(c, 35, 47) || eq(c, 58) || eq(c, 59) || eq(c, 61) || eq(c, 63) || eq(c, 64) || eq(c, 95) || eq(c, 126)
+
+def href.pick(amp: Bool, apos: Bool, safe: Bool, +c: U32, rest: String) -> String:
+  match amp:
+    case True{}:
+      "&amp;" ++ rest
+    case False{}:
+      match apos:
+        case True{}:
+          "&#x27;" ++ rest
+        case False{}:
+          match safe:
+            case True{}:
+              SCon{Chr{c}, rest}
+            case False{}:
+              pct_utf8(c) ++ rest
 
 # A URL for an href or src attribute: unsafe octets percent-encoded, & and ' as references.
 def href(s: String) -> String:
@@ -185,10 +224,7 @@ def href(s: String) -> String:
       SNil{}
     case SCon{Chr{y}, t}:
       +c = {y : U32}
-      +r = href(t)
-      Bool.pick(String, eq(c, 38), "&amp;" ++ r,
-        Bool.pick(String, eq(c, 39), "&#x27;" ++ r,
-          Bool.pick(String, href_safe(c), SCon{Chr{c}, r}, pct_utf8(c) ++ r)))
+      href.pick(eq(c, 38), eq(c, 39), href_safe(c), c, href(t))
 
 # ---- character references
 
@@ -818,7 +854,7 @@ def defs(+s: String, refs: List<&2, Ref>) -> String & List<&2, Ref>:
 
 def para.close(+llb: Bool, r: String & List<&2, Ref>, +stack: List<&2, Frame>, +line: U32) -> St:
   (+rest, refs) = r
-  St{Bool.pick(List<&2, Frame>, is_blank(rest), stack, add_kid(stack, Kid{llb, BPara{String.trim_end(rest)}})), LNone{}, refs, line}
+  St{when(List<&2, Frame>, is_blank(rest), u => stack, u => add_kid(stack, Kid{llb, BPara{String.trim_end(rest)}})), LNone{}, refs, line}
 
 def fence.body(+lines: List<&2, String>) -> String:
   Bool.pick(String, List.is_empty(&2, String, lines), "", join_rev(lines) ++ "\n")
@@ -1213,7 +1249,7 @@ def prep(p: P) -> St:
 def try.code(+p: P, c: Cx) -> Sr:
   match c:
     case Cx{+ln, at, +ind, +blank}:
-      Bool.pick(Sr, U32.is_ge(ind, 4) && Bool.not(p_tipp(p)) && Bool.not(blank), SDone{set_leaf(prep(p), LCode{False{}, [ln_s(adv(ln, 4))]})}, SStop{p})
+      when(Sr, U32.is_ge(ind, 4) && Bool.not(p_tipp(p)) && Bool.not(blank), u => SDone{set_leaf(prep(p), LCode{False{}, [ln_s(adv(ln, 4))]})}, u => SStop{p})
 
 def item.open(im: Im, +p: P, +c: Cx) -> Sr:
   match im:
@@ -1225,7 +1261,7 @@ def item.open(im: Im, +p: P, +c: Cx) -> Sr:
       +used = Bool.pick(U32, pb || U32.is_ge(cx_ind(pc), 5), 1, cx_ind(pc))
       +ok = Bool.not(p_cpara(p)) || (Bool.not(pb) && (Bool.not(is_ord(kind)) || eq(start, 1)))
       +f = {FItem{False{}, kind, start, (cx_ind(c) + w + used : U32), p_line(p), Nil{}} : Frame}
-      Bool.pick(Sr, ok, SCont{P{push_frame(prep(p), f), Bool.pick(Ln, pb, cx_at(pc), adv(post, used)), 0n, LkNone{}, p_tipp(p)}}, try.code(p, c))
+      when(Sr, ok, u => SCont{P{push_frame(prep(p), f), Bool.pick(Ln, pb, cx_at(pc), adv(post, used)), 0n, LkNone{}, p_tipp(p)}}, u => try.code(p, c))
 
 def try.item(m: Maybe<&2, Im>, +p: P, +c: Cx) -> Sr:
   match m:
@@ -1243,7 +1279,7 @@ def try.hr(ok: Bool, +p: P, +c: Cx) -> Sr:
 
 def setext.close(+lv: U32, r: String & List<&2, Ref>, +stack: List<&2, Frame>, +line: U32, +p: P) -> Sr:
   (+rest, +refs) = r
-  Bool.pick(Sr, is_blank(rest), SCont{P{St{stack, LNone{}, refs, line}, p_ln(p), 0n, LkNone{}, p_tipp(p)}}, SDone{St{add_kid(stack, Kid{False{}, BHead{lv, String.trim(rest)}}), LNone{}, refs, line}})
+  when(Sr, is_blank(rest), u => SCont{P{St{stack, LNone{}, refs, line}, p_ln(p), 0n, LkNone{}, p_tipp(p)}}, u => SDone{St{add_kid(stack, Kid{False{}, BHead{lv, String.trim(rest)}}), LNone{}, refs, line}})
 
 def setext.apply(+lv: U32, +p: P) -> Sr:
   match p:
@@ -1264,11 +1300,11 @@ def try.setext(ok: Bool, +lv: U32, +p: P, +c: Cx) -> Sr:
 def html.open(+k: U32, +p: P, +c: Cx) -> Sr:
   +s = ln_s(cx_ln(c))
   +st = set_leaf(prep(p), LHtml{k, [s]})
-  SDone{Bool.pick(St, U32.is_le(k, 5) && html_end(k, s), close_leaf(st), st)}
+  SDone{when(St, U32.is_le(k, 5) && html_end(k, s), u => close_leaf(st), u => st)}
 
 def try.html(+k: U32, +p: P, +c: Cx) -> Sr:
   +lv = setext(ln_s(cx_at(c)))
-  Bool.pick(Sr, U32.is_gt(k, 0), html.open(k, p, c), try.setext(U32.is_le(cx_ind(c), 3) && p_cpara(p) && U32.is_gt(lv, 0), lv, p, c))
+  when(Sr, U32.is_gt(k, 0), u => html.open(k, p, c), u => try.setext(U32.is_le(cx_ind(c), 3) && p_cpara(p) && U32.is_gt(lv, 0), lv, p, c))
 
 def try.fence(m: Maybe<&2, Fg>, +p: P, +c: Cx) -> Sr:
   match m:
@@ -1397,7 +1433,7 @@ def leaf_add(st: St, +s: String) -> St:
           St{stack, LFence{c, n, ind, info, s <> ls}, refs, line}
         case LHtml{+k, ls}:
           +st2 = {St{stack, LHtml{k, s <> ls}, refs, line} : St}
-          Bool.pick(St, U32.is_le(k, 5) && html_end(k, s), close_leaf(st2), st2)
+          when(St, U32.is_le(k, 5) && html_end(k, s), u => close_leaf(st2), u => st2)
         case LNone{}:
           St{stack, LPara{False{}, [s]}, refs, line}
 
@@ -1410,7 +1446,7 @@ def text.put(p: P, +c: Cx) -> St:
         case LkLeaf{}:
           leaf_llb(leaf_add(st, ln_s(ln)), cx_blank(c))
         case _:
-          Bool.pick(St, cx_blank(c), head_blank(st), reset_llb(leaf_add(st, ln_s(cx_at(c)))))
+          when(St, cx_blank(c), u => head_blank(st), u => reset_llb(leaf_add(st, ln_s(cx_at(c)))))
 
 def text.lazy(lazy: Bool, +p: P, +c: Cx) -> St:
   match lazy:
@@ -1503,7 +1539,7 @@ def clean(s: String) -> String:
       SCon{Chr{Bool.pick(U32, eq(y, 0), 65533, y)}, clean(t)}
 
 def drop_cr(+l: String) -> String:
-  Bool.pick(String, String.ends_with(l, "\r"), String.take(l, Nat.sub(String.length(l), 1n)), l)
+  when(String, String.ends_with(l, "\r"), u => String.take(l, Nat.sub(String.length(l), 1n)), u => l)
 
 def lines.go(xs: List<&2, String>) -> List<&2, String>:
   match xs:
@@ -1576,7 +1612,8 @@ def find(stack: List<&2, Inl>, +c: U32, +orig: U32, +copen: Bool, +acc: List<&2,
     case Nil{}:
       None{}
     case Con{IDelim{+c2, +n2, +o2, +op2, +cl2}, +rest}:
-      Bool.pick(Maybe<&2, Fd>, eq(c2, c) && op2 && Bool.not(odd_fail(cl2, o2, copen, orig)), Some{Fd{acc, c2, n2, o2, op2, cl2, rest}}, find(rest, c, orig, copen, IDelim{c2, n2, o2, op2, cl2} <> acc))
+      +fits = Bool.pick(Bool, eq(c, 126), eq(o2, orig), Bool.not(odd_fail(cl2, o2, copen, orig)))
+      Bool.pick(Maybe<&2, Fd>, eq(c2, c) && op2 && fits, Some{Fd{acc, c2, n2, o2, op2, cl2, rest}}, find(rest, c, orig, copen, IDelim{c2, n2, o2, op2, cl2} <> acc))
     case Con{x, rest}:
       find(rest, c, orig, copen, x <> acc)
 
@@ -1594,8 +1631,8 @@ def seek(more: Bool, stack: List<&2, Inl>, +c: U32, +orig: U32, +copen: Bool) ->
     case True{}:
       rs.of(find(stack, c, orig, copen, Nil{}))
 
-def wrap(+use: U32, +xs: List<&2, Inl>) -> Inl:
-  +tag = Bool.pick(String, eq(use, 2), "strong", "em")
+def wrap(+c: U32, +use: U32, +xs: List<&2, Inl>) -> Inl:
+  +tag = Bool.pick(String, eq(c, 126), "del", Bool.pick(String, eq(use, 2), "strong", "em"))
   +plain = p.inl(xs)
   IHtml{"<" ++ tag ++ ">" ++ r.inl(xs) ++ "</" ++ tag ++ ">", plain}
 
@@ -1614,8 +1651,8 @@ def resolve(f: Nat, r: Rs, +stack: List<&2, Inl>, +c: U32, +n: U32, +orig: U32, 
         case RNone{}:
           Bool.pick(List<&2, Inl>, copen, IDelim{c, n, orig, copen, True{}} <> stack, IText{rep(c, n)} <> stack)
         case RFound{Fd{above, c2, +n2, o2, op2, cl2, below}}:
-          +use = Bool.pick(U32, U32.is_ge(n, 2) && U32.is_ge(n2, 2), 2, 1)
-          +st2 = {wrap(use, above) <> keep((n2 - use : U32), c2, o2, op2, cl2, below) : List<&2, Inl>}
+          +use = Bool.pick(U32, eq(c, 126), n, Bool.pick(U32, U32.is_ge(n, 2) && U32.is_ge(n2, 2), 2, 1))
+          +st2 = {wrap(c, use, above) <> keep((n2 - use : U32), c2, o2, op2, cl2, below) : List<&2, Inl>}
           +nr = (n - use : U32)
           resolve(g, seek(U32.is_gt(nr, 0), st2, c, orig, copen), st2, c, nr, orig, copen)
 
@@ -1673,7 +1710,7 @@ def cnl(s: String) -> String:
 # Code span text: line endings as spaces, and one space stripped from each end when both ends have one.
 def cnorm(+s: String) -> String:
   +strip = String.starts_with(s, " ") && String.ends_with(s, " ") && Bool.not(String.is_empty(skip(~(c => eq(c, 32)), s)))
-  Bool.pick(String, strip, String.take(String.drop(s, 1n), Nat.sub(String.length(s), 2n)), s)
+  when(String, strip, u => String.take(String.drop(s, 1n), Nat.sub(String.length(s), 2n)), u => s)
 
 def code.got(m: Maybe<&2, Got>, +ticks: Nat, +after: String, +buf: String, out: List<&2, Inl>) -> Is:
   match m:
@@ -1750,30 +1787,86 @@ def url(safe: Bool, +s: String) -> String:
     case True{}:
       href(Bool.pick(String, url.bad(s), SNil{}, s))
 
-def raw_or_omit(safe: Bool, +raw: String) -> String:
-  Bool.pick(String, safe, "<!-- raw HTML omitted -->", raw)
+# Render options. safe renders as cmark without --unsafe. gfm turns on the GitHub extensions.
+type Opts is Data:
+  Opts{safe: Bool, gfm: Bool}
 
-def lt.html(m: Maybe<&2, String>, +s: String, +buf: String, out: List<&2, Inl>, +safe: Bool) -> Is:
+def o.safe(o: Opts) -> Bool:
+  match o:
+    case Opts{s, g}:
+      s
+
+def o.gfm(o: Opts) -> Bool:
+  match o:
+    case Opts{s, g}:
+      g
+
+def tagf.end(m: Maybe<&2, String>) -> Bool:
+  match m:
+    case None{}:
+      False{}
+    case Some{+r}:
+      +c = hd(r)
+      is_sp(c) || eq(c, 10) || eq(c, 12) || eq(c, 13) || eq(c, 62) || String.starts_with(r, "/>")
+
+def tagf.name(+n: String, +a: String) -> Bool:
+  tagf.end(lit_ci(n, a))
+
+# s follows a <. GFM's tag filter blocks these nine tags, open or closed.
+def tagf.bad(+s: String) -> Bool:
+  +a = Bool.pick(String, eq(hd(s), 47), String.drop(s, 1n), s)
+  tagf.name("title", a) || tagf.name("textarea", a) || tagf.name("style", a) || tagf.name("xmp", a) || tagf.name("iframe", a) || tagf.name("noembed", a) || tagf.name("noframes", a) || tagf.name("script", a) || tagf.name("plaintext", a)
+
+def tagf.lt(lt: Bool, +s: String) -> Bool:
+  match lt:
+    case False{}:
+      False{}
+    case True{}:
+      tagf.bad(s)
+
+def tagfilter(s: String) -> String:
+  match s:
+    case SNil{}:
+      SNil{}
+    case SCon{Chr{+y}, +t}:
+      +r = tagfilter(t)
+      Bool.pick(String, tagf.lt(eq(y, 60), t), "&lt;" ++ r, SCon{Chr{y}, r})
+
+# Raw HTML as the options render it.
+def html_out(o: Opts, +raw: String) -> String:
+  match o:
+    case Opts{s, g}:
+      match s:
+        case True{}:
+          "<!-- raw HTML omitted -->"
+        case False{}:
+          match g:
+            case True{}:
+              tagfilter(raw)
+            case False{}:
+              raw
+
+def lt.html(m: Maybe<&2, String>, +s: String, +buf: String, out: List<&2, Inl>, +o: Opts) -> Is:
   match m:
     case None{}:
       Is{String.drop(s, 1n), 60, SCon{'<', buf}, out}
     case Some{+rest}:
       +raw = String.take(s, Nat.sub(String.length(s), String.length(rest)))
-      Is{rest, 62, SNil{}, IHtml{raw_or_omit(safe, raw), raw} <> flush(buf, out)}
+      Is{rest, 62, SNil{}, IHtml{html_out(o, raw), raw} <> flush(buf, out)}
 
-def lt.email(m: Maybe<&2, Got>, +s: String, +buf: String, out: List<&2, Inl>, +safe: Bool) -> Is:
+def lt.email(m: Maybe<&2, Got>, +s: String, +buf: String, out: List<&2, Inl>, +o: Opts) -> Is:
   match m:
     case Some{Got{+v, rest}}:
       Is{rest, 62, SNil{}, IHtml{"<a href=\"mailto:" ++ href(v) ++ "\">" ++ esc(v) ++ "</a>", v} <> flush(buf, out)}
     case None{}:
-      lt.html(raw_html(s), s, buf, out, safe)
+      lt.html(raw_html(s), s, buf, out, o)
 
-def lt.uri(m: Maybe<&2, Got>, +s: String, +buf: String, out: List<&2, Inl>, +safe: Bool) -> Is:
+def lt.uri(m: Maybe<&2, Got>, +s: String, +buf: String, out: List<&2, Inl>, +o: Opts) -> Is:
   match m:
     case Some{Got{+v, rest}}:
-      Is{rest, 62, SNil{}, IHtml{"<a href=\"" ++ url(safe, v) ++ "\">" ++ esc(v) ++ "</a>", v} <> flush(buf, out)}
+      Is{rest, 62, SNil{}, IHtml{"<a href=\"" ++ url(o.safe(o), v) ++ "\">" ++ esc(v) ++ "</a>", v} <> flush(buf, out)}
     case None{}:
-      lt.email(auto.email(String.drop(s, 1n)), s, buf, out, safe)
+      lt.email(auto.email(String.drop(s, 1n)), s, buf, out, o)
 
 def amp.got(m: Maybe<&2, Got>, +t: String, buf: String, out: List<&2, Inl>) -> Is:
   match m:
@@ -1794,17 +1887,176 @@ def bs(+t: String, +buf: String, +out: List<&2, Inl>) -> Is:
     Bool.pick(Is, eq(x, 10), Is{skip(~(c => is_sp(c)), String.drop(t, 1n)), 10, SNil{}, IHtml{"<br />\n", "\n"} <> flush(buf, out)},
       Is{t, 92, SCon{'\\', buf}, out}))
 
-def delim(+c: U32, +s: String, +prev: U32, +buf: String, out: List<&2, Inl>) -> Is:
+def delim(+c: U32, +s: String, +prev: U32, +buf: String, +out: List<&2, Inl>) -> Is:
   +n = count(c, s)
   +rest = String.drop(s, n)
   +nx = hd(rest)
   +left = Bool.not(is_uws(nx)) && (Bool.not(is_punct(nx)) || is_uws(prev) || is_punct(prev))
   +right = Bool.not(is_uws(prev)) && (Bool.not(is_punct(prev)) || is_uws(nx) || is_punct(nx))
-  +star = eq(c, 42)
+  +star = eq(c, 42) || eq(c, 126)
   +op = Bool.pick(Bool, star, left, left && (Bool.not(right) || is_punct(prev)))
   +cl = Bool.pick(Bool, star, right, right && (Bool.not(left) || is_punct(nx)))
   +k = U32.from_nat(n)
-  Is{rest, c, SNil{}, IDelim{c, k, k, op, cl} <> flush(buf, out)}
+  Bool.pick(Is, eq(c, 126) && U32.is_gt(k, 2), Is{rest, c, revapp(rep(c, k), buf), out}, Is{rest, c, SNil{}, IDelim{c, k, k, op, cl} <> flush(buf, out)})
+
+# ---- GFM extended autolinks
+
+# A code point after which an extended autolink may start.
+def al.bound(+c: U32) -> Bool:
+  eq(c, 10) || eq(c, 32) || eq(c, 9) || eq(c, 42) || eq(c, 95) || eq(c, 126) || eq(c, 40)
+
+def al.space(+c: U32) -> Bool:
+  eq(c, 32) || within(c, 9, 13)
+
+def al.host(+c: U32) -> Bool:
+  is_alnum(c) || U32.is_ge(c, 128)
+
+def al.cnt(+k: U32, s: String, +n: Nat) -> Nat:
+  match s:
+    case SNil{}:
+      n
+    case SCon{Chr{+y}, t}:
+      al.cnt(k, t, Bool.pick(Nat, eq(y, k), 1n+n, n))
+
+def al.last2(xs: List<&2, String>, +a: String, +b: String) -> String & String:
+  match xs:
+    case Nil{}:
+      (a, b)
+    case Con{x, rest}:
+      al.last2(rest, b, x)
+
+def al.dom.of(+run: String, +allow_short: Bool, p: String & String) -> Nat:
+  (u1s, u2s) = p
+  +np = al.cnt(46, run, 0n)
+  +bad = Bool.not(Nat.is_eq(al.cnt(95, u1s, 0n), 0n)) || Bool.not(Nat.is_eq(al.cnt(95, u2s, 0n), 0n))
+  Bool.pick(Nat, bad || Bool.not(allow_short || Bool.not(Nat.is_eq(np, 0n))), 0n, 1n+String.length(run))
+
+def al.dom.run(p: String & String) -> String:
+  (+run0, rest0) = p
+  Bool.pick(String, String.is_empty(rest0), String.reverse(String.drop(String.reverse(run0), 1n)), run0)
+
+# cmark-gfm's check_domain: the length of the domain at s, or 0. It never looks at the last code point of s.
+def al.dom(+s: String, +allow_short: Bool) -> Nat:
+  +run = al.dom.run(span(~(c => al.host(c) || eq(c, 45) || eq(c, 95) || eq(c, 46)), String.drop(s, 1n)))
+  al.dom.of(run, allow_short, al.last2(String.split(run, '.'), "", ""))
+
+type Ak is Data:
+  AkStop{}
+  AkParen{}
+  AkPunct{}
+  AkSemi{}
+
+def al.k(+c: U32) -> Ak:
+  Bool.pick(Ak, eq(c, 41), AkParen{},
+    Bool.pick(Ak, eq(c, 63) || eq(c, 33) || eq(c, 46) || eq(c, 44) || eq(c, 58) || eq(c, 42) || eq(c, 95) || eq(c, 126) || eq(c, 39) || eq(c, 34), AkPunct{},
+      Bool.pick(Ak, eq(c, 59), AkSemi{}, AkStop{})))
+
+def al.semi(+t: String) -> String:
+  +k = String.length(fst(span(~(c => is_alpha(c)), t)))
+  Bool.pick(String, Nat.is_gt(k, 0n) && eq(hd(String.drop(t, k)), 38), String.drop(t, 1n+k), t)
+
+# cmark-gfm's autolink_delim over the link reversed: trailing punctuation, unbalanced ) and a trailing entity drop off.
+def al.trim(f: Nat, k: Ak, +rs: String, +closing: Nat, +opening: Nat) -> String:
+  match f:
+    case 0n:
+      rs
+    case 1n+g:
+      match k:
+        case AkStop{}:
+          rs
+        case AkPunct{}:
+          +t = String.drop(rs, 1n)
+          al.trim(g, al.k(hd(t)), t, closing, opening)
+        case AkSemi{}:
+          +t = al.semi(String.drop(rs, 1n))
+          al.trim(g, al.k(hd(t)), t, closing, opening)
+        case AkParen{}:
+          +t = String.drop(rs, 1n)
+          Bool.pick(String, Nat.is_le(closing, opening), rs, al.trim(g, al.k(hd(t)), t, Nat.sub(closing, 1n), opening))
+
+def al.delim(+link: String) -> String:
+  +l = fst(span(~(c => Bool.not(eq(c, 60))), link))
+  +rs = String.reverse(l)
+  String.reverse(al.trim(1n+String.length(rs), al.k(hd(rs)), rs, al.cnt(41, l, 0n), al.cnt(40, l, 0n)))
+
+type Al is Data:
+  Al{href: String, text: String}
+
+def al.link(+pre: String, +text: String) -> Maybe<&2, Al>:
+  Bool.pick(Maybe<&2, Al>, String.is_empty(text), None{}, Some{Al{pre ++ text, text}})
+
+# The domain is d long; the link runs to the next space, then loses its trailing punctuation.
+def al.tail(+pre: String, +d: Nat, +s: String) -> Maybe<&2, Al>:
+  +e = Nat.add(d, String.length(fst(span(~(c => Bool.not(al.space(c))), String.drop(s, d)))))
+  Bool.pick(Maybe<&2, Al>, Nat.is_eq(d, 0n), None{}, al.link(pre, al.delim(String.take(s, e))))
+
+def al.www(+s: String) -> Maybe<&2, Al>:
+  Bool.pick(Maybe<&2, Al>, String.starts_with(s, "www."), al.tail("http://", al.dom(s, False{}), s), None{})
+
+def al.scheme.of(m: Maybe<&2, String>, +s: String) -> Maybe<&2, Al>:
+  match m:
+    case None{}:
+      None{}
+    case Some{+a}:
+      +k = Nat.sub(String.length(s), String.length(a))
+      +d = Bool.pick(Nat, al.host(hd(a)), al.dom(a, True{}), 0n)
+      al.tail("", Bool.pick(Nat, Nat.is_eq(d, 0n), 0n, Nat.add(k, d)), s)
+
+def al.scheme(+p: String, +s: String) -> Maybe<&2, Al>:
+  al.scheme.of(lit(p, s), s)
+
+def al.mail_ch(+c: U32) -> Bool:
+  is_alnum(c) || eq(c, 46) || eq(c, 43) || eq(c, 45) || eq(c, 95)
+
+def al.dpart.ok(+c: U32, +nx: U32) -> Bool:
+  is_alnum(c) || eq(c, 45) || eq(c, 95) || eq(c, 64) || (eq(c, 46) && is_alnum(nx))
+
+def al.dpart.go(s: String, ok: Bool, +acc: String) -> String:
+  match s:
+    case SNil{}:
+      String.reverse(acc)
+    case SCon{Chr{+y}, +t}:
+      match ok:
+        case False{}:
+          String.reverse(acc)
+        case True{}:
+          al.dpart.go(t, al.dpart.ok(hd(t), hd(String.drop(t, 1n))), SCon{Chr{y}, acc})
+
+# The domain of an email after its @, as cmark-gfm's email_match scans it.
+def al.dpart(+s: String) -> String:
+  al.dpart.go(s, al.dpart.ok(hd(s), hd(String.drop(s, 1n))), SNil{})
+
+def al.mail(+s: String) -> Maybe<&2, Al>:
+  +local = fst(span(~(c => al.mail_ch(c)), s))
+  +a = String.drop(s, String.length(local))
+  +dom = al.dpart(String.drop(a, 1n))
+  +ok = Bool.not(String.is_empty(local)) && eq(hd(a), 64) && Bool.not(String.is_empty(dom)) && Nat.is_eq(al.cnt(64, dom, 0n), 0n) && Bool.not(Nat.is_eq(al.cnt(46, dom, 0n), 0n)) && is_alpha(hd(String.reverse(dom)))
+  Bool.pick(Maybe<&2, Al>, ok, al.link("mailto:", local ++ "@" ++ dom), None{})
+
+def al.or(a: Maybe<&2, Al>, b: Maybe<&2, Al>) -> Maybe<&2, Al>:
+  match a:
+    case Some{x}:
+      Some{x}
+    case None{}:
+      b
+
+# A GFM extended autolink at the start of s: www., http://, https://, ftp://, or an email address.
+def al(+s: String) -> Maybe<&2, Al>:
+  al.or(al.www(s), al.or(al.scheme("http://", s), al.or(al.scheme("https://", s), al.or(al.scheme("ftp://", s), al.mail(s)))))
+
+def other.al(m: Maybe<&2, Al>, +y: U32, +t: String, +buf: String, out: List<&2, Inl>, +safe: Bool) -> Is:
+  match m:
+    case None{}:
+      Is{t, y, SCon{Chr{y}, buf}, out}
+    case Some{Al{h, +x}}:
+      Is{String.drop(SCon{Chr{y}, t}, String.length(x)), hd(String.reverse(x)), SNil{}, IHtml{"<a href=\"" ++ url(safe, h) ++ "\">" ++ esc(x) ++ "</a>", x} <> flush(buf, out)}
+
+def other(try: Bool, +y: U32, +t: String, +buf: String, out: List<&2, Inl>, +o: Opts) -> Is:
+  match try:
+    case False{}:
+      Is{t, y, SCon{Chr{y}, buf}, out}
+    case True{}:
+      other.al(al(SCon{Chr{y}, t}), y, t, buf, out, o.safe(o))
 
 # ---- links
 
@@ -1855,7 +2107,7 @@ def ref.full(m: Maybe<&2, Got>, +t: String, +raw: String, +refs: List<&2, Ref>) 
     case Some{Got{lab, rest}}:
       lookup(refs, lab, rest)
     case None{}:
-      Bool.pick(Maybe<&2, Lt>, String.starts_with(t, "[]"), lookup(refs, raw, String.drop(t, 2n)), lookup(refs, raw, t))
+      when(Maybe<&2, Lt>, String.starts_with(t, "[]"), u => lookup(refs, raw, String.drop(t, 2n)), u => lookup(refs, raw, t))
 
 def ref.tail(+t: String, +raw: String, +refs: List<&2, Ref>) -> Maybe<&2, Lt>:
   ref.full(Bool.pick(Maybe<&2, Got>, eq(hd(t), 91), label(String.drop(t, 1n)), None{}), t, raw, refs)
@@ -1910,27 +2162,27 @@ def title_attr(m: Maybe<&2, String>) -> String:
     case Some{t}:
       " title=\"" ++ esc(t) ++ "\""
 
-def link.make(lt: Lt, xs: List<&2, Inl>, +img: Bool, +below: List<&2, Inl>, +safe: Bool) -> Is:
+def link.make(lt: Lt, xs: List<&2, Inl>, +img: Bool, +below: List<&2, Inl>, +o: Opts) -> Is:
   match lt:
     case Lt{d, +t, +rest}:
       +ys = emph(xs)
       +plain = p.inl(ys)
-      +u = url(safe, d)
-      Bool.pick(Is, img,
-        Is{rest, 93, SNil{}, IHtml{"<img src=\"" ++ u ++ "\" alt=\"" ++ esc(plain) ++ "\"" ++ title_attr(t) ++ " />", plain} <> below},
-        Is{rest, 93, SNil{}, IHtml{"<a href=\"" ++ u ++ "\"" ++ title_attr(t) ++ ">" ++ r.inl(ys) ++ "</a>", plain} <> deact(below)})
+      +u = url(o.safe(o), d)
+      when(Is, img,
+        z => Is{rest, 93, SNil{}, IHtml{"<img src=\"" ++ u ++ "\" alt=\"" ++ esc(plain) ++ "\"" ++ title_attr(t) ++ " />", plain} <> below},
+        z => Is{rest, 93, SNil{}, IHtml{"<a href=\"" ++ u ++ "\"" ++ title_attr(t) ++ ">" ++ r.inl(ys) ++ "</a>", plain} <> deact(below)})
 
 def link.fail(above: List<&2, Inl>, +img: Bool, below: List<&2, Inl>, +t: String) -> Is:
   Is{t, 93, SCon{']', SNil{}}, List.append(&2, Inl, List.reverse(&2, Inl, above), IText{Bool.pick(String, img, "![", "[")} <> below)}
 
-def link.try(m: Maybe<&2, Lt>, above: List<&2, Inl>, +img: Bool, below: List<&2, Inl>, +t: String, +safe: Bool) -> Is:
+def link.try(m: Maybe<&2, Lt>, above: List<&2, Inl>, +img: Bool, below: List<&2, Inl>, +t: String, +o: Opts) -> Is:
   match m:
     case Some{lt}:
-      link.make(lt, above, img, below, safe)
+      link.make(lt, above, img, below, o)
     case None{}:
       link.fail(above, img, below, t)
 
-def close.br(m: Maybe<&2, Bk>, +t: String, +out: List<&2, Inl>, +refs: List<&2, Ref>, +safe: Bool) -> Is:
+def close.br(m: Maybe<&2, Bk>, +t: String, +out: List<&2, Inl>, +refs: List<&2, Ref>, +o: Opts) -> Is:
   match m:
     case None{}:
       Is{t, 93, SCon{']', SNil{}}, out}
@@ -1940,7 +2192,7 @@ def close.br(m: Maybe<&2, Bk>, +t: String, +out: List<&2, Inl>, +refs: List<&2, 
           link.fail(above, img, below, t)
         case True{}:
           +raw = String.take(after, Nat.sub(Nat.sub(String.length(after), String.length(t)), 1n))
-          link.try(lt_or(inl.tail(t), ref.tail(t, raw, refs)), above, img, below, t, safe)
+          link.try(lt_or(inl.tail(t), ref.tail(t, raw, refs)), above, img, below, t, o)
 
 # ---- the scanner loop
 
@@ -1956,10 +2208,10 @@ type Ic is Data:
   IcNl{}
   IcOther{}
 
-def ic(+c: U32, +nx: U32) -> Ic:
+def ic(+c: U32, +nx: U32, +gfm: Bool) -> Ic:
   Bool.pick(Ic, eq(c, 92), IcBs{},
     Bool.pick(Ic, eq(c, 96), IcTick{},
-      Bool.pick(Ic, eq(c, 42) || eq(c, 95), IcStar{},
+      Bool.pick(Ic, eq(c, 42) || eq(c, 95) || (gfm && eq(c, 126)), IcStar{},
         Bool.pick(Ic, eq(c, 91), IcOpen{},
           Bool.pick(Ic, eq(c, 33) && eq(nx, 91), IcBang{},
             Bool.pick(Ic, eq(c, 93), IcClose{},
@@ -1967,10 +2219,10 @@ def ic(+c: U32, +nx: U32) -> Ic:
                 Bool.pick(Ic, eq(c, 38), IcAmp{},
                   Bool.pick(Ic, eq(c, 10), IcNl{}, IcOther{})))))))))
 
-def istep(k: Ic, +y: U32, +t: String, +prev: U32, +buf: String, +out: List<&2, Inl>, +refs: List<&2, Ref>, +safe: Bool) -> Is:
+def istep(k: Ic, +y: U32, +t: String, +prev: U32, +buf: String, +out: List<&2, Inl>, +refs: List<&2, Ref>, +o: Opts) -> Is:
   match k:
     case IcOther{}:
-      Is{t, y, SCon{Chr{y}, buf}, out}
+      other(o.gfm(o) && al.bound(prev), y, t, buf, out, o)
     case IcBs{}:
       bs(t, buf, out)
     case IcTick{}:
@@ -1982,15 +2234,15 @@ def istep(k: Ic, +y: U32, +t: String, +prev: U32, +buf: String, +out: List<&2, I
     case IcBang{}:
       Is{String.drop(t, 1n), 91, SNil{}, IBrack{True{}, True{}, String.drop(t, 1n)} <> flush(buf, out)}
     case IcClose{}:
-      close.br(brk(flush(buf, out), Nil{}), t, flush(buf, out), refs, safe)
+      close.br(brk(flush(buf, out), Nil{}), t, flush(buf, out), refs, o)
     case IcLt{}:
-      lt.uri(auto.uri(t), SCon{Chr{y}, t}, buf, out, safe)
+      lt.uri(auto.uri(t), SCon{Chr{y}, t}, buf, out, o)
     case IcAmp{}:
       amp.got(ent(t), t, buf, out)
     case IcNl{}:
       nl(t, buf, out)
 
-def inl.go(f: Nat, st: Is, +refs: List<&2, Ref>, +safe: Bool) -> List<&2, Inl>:
+def inl.go(f: Nat, st: Is, +refs: List<&2, Ref>, +o: Opts) -> List<&2, Inl>:
   match f:
     case 0n:
       Nil{}
@@ -2001,11 +2253,11 @@ def inl.go(f: Nat, st: Is, +refs: List<&2, Ref>, +safe: Bool) -> List<&2, Inl>:
             case SNil{}:
               List.reverse(&2, Inl, flush(buf, out))
             case SCon{Chr{+y}, +t}:
-              inl.go(g, istep(ic(y, hd(t)), y, t, prev, buf, out, refs, safe), refs, safe)
+              inl.go(g, istep(ic(y, hd(t), o.gfm(o)), y, t, prev, buf, out, refs, o), refs, o)
 
 # A paragraph or heading's text as HTML.
-def inline(+s: String, +refs: List<&2, Ref>, +safe: Bool) -> String:
-  r.inl(emph(inl.go(Nat.add(String.length(s), 2n), Is{s, 10, SNil{}, Nil{}}, refs, safe)))
+def inline(+s: String, +refs: List<&2, Ref>, +o: Opts) -> String:
+  r.inl(emph(inl.go(Nat.add(String.length(s), 2n), Is{s, 10, SNil{}, Nil{}}, refs, o)))
 
 # ---- HTML
 
@@ -2022,37 +2274,168 @@ def code_open(+info: String) -> String:
 def list_open(+ord: Bool, +start: U32) -> String:
   Bool.pick(String, ord, Bool.pick(String, eq(start, 1), "<ol>\n", "<ol start=\"" ++ U32.show(start) ++ "\">\n"), "<ul>\n")
 
+# ---- GFM tables
+
+# Pieces split at every |; a piece that ends in an odd run of \ joins the next one, its \ dropped.
+def tbl.join(xs: List<&2, String>, +cur: String, +acc: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      List.reverse(&2, String, String.trim(cur) <> acc)
+    case Con{+p, rest}:
+      +odd = Nat.is_eq(Nat.mod(count(92, String.reverse(cur)), 2n), 1n)
+      +cur2 = String.reverse(String.drop(String.reverse(cur), 1n)) ++ "|" ++ p
+      tbl.join(rest, Bool.pick(String, odd, cur2, p), Bool.pick(List<&2, String>, odd, acc, String.trim(cur) <> acc))
+
+def tbl.cells.of(xs: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case Con{+p, rest}:
+      tbl.join(rest, p, Nil{})
+
+# A table row's cells, trimmed, with its outer pipes dropped and \| as |.
+def tbl.cells(+row: String) -> List<&2, String>:
+  +r = String.trim(row)
+  +a = Bool.pick(String, String.starts_with(r, "|"), String.drop(r, 1n), r)
+  +ra = String.reverse(a)
+  +tail = String.starts_with(ra, "|") && Nat.is_eq(Nat.mod(count(92, String.drop(ra, 1n)), 2n), 0n) && Bool.not(String.is_empty(a))
+  tbl.cells.of(String.split(Bool.pick(String, tail, String.reverse(String.drop(ra, 1n)), a), '|'))
+
+def tbl.dcell(+c: String) -> Bool:
+  +a = Bool.pick(String, String.starts_with(c, ":"), String.drop(c, 1n), c)
+  +ra = String.reverse(a)
+  +b = Bool.pick(String, String.starts_with(ra, ":"), String.drop(ra, 1n), ra)
+  Bool.not(String.is_empty(b)) && String.is_empty(skip(~(x => eq(x, 45)), b))
+
+def tbl.drow(cs: List<&2, String>) -> Bool:
+  match cs:
+    case Nil{}:
+      True{}
+    case Con{c, rest}:
+      tbl.dcell(c) && tbl.drow(rest)
+
+def tbl.align(+c: String) -> String:
+  +l = String.starts_with(c, ":")
+  +r = String.ends_with(c, ":")
+  Bool.pick(String, l && r, " align=\"center\"", Bool.pick(String, r, " align=\"right\"", Bool.pick(String, l, " align=\"left\"", "")))
+
+def tbl.aligns(cs: List<&2, String>) -> List<&2, String>:
+  match cs:
+    case Nil{}:
+      Nil{}
+    case Con{c, rest}:
+      tbl.align(c) <> tbl.aligns(rest)
+
+# A table in a paragraph: the lines before its header row, the header cells, the alignments, and the body rows.
+type Tb is Data:
+  Tb{before: List<&2, String>, head: List<&2, String>, aligns: List<&2, String>, rows: List<&2, String>}
+
+def tbl.find(ls: List<&2, String>, +before: List<&2, String>) -> Maybe<&2, Tb>:
+  match ls:
+    case Con{+h, +tl}:
+      match tl:
+        case Con{+d, +rest}:
+          +hc = tbl.cells(h)
+          +dc = tbl.cells(d)
+          +hit = String.contains(d, "-") && tbl.drow(dc) && Nat.is_eq(List.length(&2, String, hc), List.length(&2, String, dc))
+          Bool.pick(Maybe<&2, Tb>, hit, Some{Tb{List.reverse(&2, String, before), hc, tbl.aligns(dc), rest}}, tbl.find(tl, h <> before))
+        case Nil{}:
+          None{}
+    case Nil{}:
+      None{}
+
+# One row's cells, cut or padded with empty cells to the header's width.
+def tbl.row(aligns: List<&2, String>, cs: List<&2, String>, +tag: String, +refs: List<&2, Ref>, +o: Opts) -> String:
+  match aligns cs:
+    case Nil{} _:
+      ""
+    case Con{+a, ar} Nil{}:
+      "<" ++ tag ++ a ++ "></" ++ tag ++ ">\n" ++ tbl.row(ar, Nil{}, tag, refs, o)
+    case Con{+a, ar} Con{c, cr}:
+      "<" ++ tag ++ a ++ ">" ++ inline(c, refs, o) ++ "</" ++ tag ++ ">\n" ++ tbl.row(ar, cr, tag, refs, o)
+
+def tbl.rows(rows: List<&2, String>, +aligns: List<&2, String>, +refs: List<&2, Ref>, +o: Opts) -> String:
+  match rows:
+    case Nil{}:
+      ""
+    case Con{r, rest}:
+      "<tr>\n" ++ tbl.row(aligns, tbl.cells(r), "td", refs, o) ++ "</tr>\n" ++ tbl.rows(rest, aligns, refs, o)
+
+def tbl.html(+head: List<&2, String>, +aligns: List<&2, String>, +rows: List<&2, String>, +refs: List<&2, Ref>, +o: Opts) -> String:
+  +body = Bool.pick(String, List.is_empty(&2, String, rows), "", "<tbody>\n" ++ tbl.rows(rows, aligns, refs, o) ++ "</tbody>\n")
+  "<table>\n<thead>\n<tr>\n" ++ tbl.row(aligns, head, "th", refs, o) ++ "</tr>\n</thead>\n" ++ body ++ "</table>\n"
+
+# A paragraph's text, after pre, in <p> unless tight.
+def r.text(+t: String, +tight: Bool, +refs: List<&2, Ref>, +o: Opts, +pre: String, +out: String) -> String:
+  +h = pre ++ inline(t, refs, o)
+  when(String, tight, u => put(h, out), u => put("</p>\n", put(h, put("<p>", cr(out)))))
+
+def r.tbl(m: Maybe<&2, Tb>, +t: String, +tight: Bool, +refs: List<&2, Ref>, +o: Opts, +out: String) -> String:
+  match m:
+    case None{}:
+      r.text(t, tight, refs, o, "", out)
+    case Some{Tb{+before, head, aligns, rows}}:
+      +o1 = when(String, List.is_empty(&2, String, before), u => out, u => r.text(String.join(before, "\n"), tight, refs, o, "", out))
+      put(tbl.html(head, aligns, rows, refs, o), cr(o1))
+
+def r.para(gfm: Bool, +t: String, +tight: Bool, +refs: List<&2, Ref>, +o: Opts, +out: String) -> String:
+  match gfm:
+    case False{}:
+      r.text(t, tight, refs, o, "", out)
+    case True{}:
+      r.tbl(Bool.pick(Maybe<&2, Tb>, String.contains(t, "|"), tbl.find(String.split(t, '\n'), Nil{}), None{}), t, tight, refs, o, out)
+
+# A GFM task list item's first paragraph: 0 for none, 1 for [ ], 2 for [x] or [X].
+def task.kind(+gfm: Bool, +t: String) -> U32:
+  +ws = is_sp(hd(String.drop(t, 3n))) || eq(hd(String.drop(t, 3n)), 10)
+  +box = Bool.pick(U32, String.starts_with(t, "[ ]"), 1, Bool.pick(U32, String.starts_with(t, "[x]") || String.starts_with(t, "[X]"), 2, 0))
+  Bool.pick(U32, gfm && ws, box, 0)
+
+def r.first(task: Bool, +k: U32, +t: String, +tight: Bool, +refs: List<&2, Ref>, +o: Opts, +out: String) -> String:
+  match task:
+    case False{}:
+      r.para(o.gfm(o), t, tight, refs, o, out)
+    case True{}:
+      r.text(String.drop(t, 3n), tight, refs, o, Bool.pick(String, eq(k, 2), "<input checked=\"\" disabled=\"\" type=\"checkbox\">", "<input disabled=\"\" type=\"checkbox\">"), out)
+
 # out is reversed. tight: these kids are the children of an item in a tight list.
-def r.go(ks: List<&2, Kid>, +tight: Bool, +refs: List<&2, Ref>, +safe: Bool, +out: String) -> String:
+def r.go(ks: List<&2, Kid>, +tight: Bool, +refs: List<&2, Ref>, +o: Opts, +out: String) -> String:
   match ks:
     case Nil{}:
       out
     case Con{Kid{l, BPara{t}}, rest}:
-      +h = inline(t, refs, safe)
-      r.go(rest, tight, refs, safe, Bool.pick(String, tight, put(h, out), put("</p>\n", put(h, put("<p>", cr(out))))))
+      r.go(rest, tight, refs, o, r.para(o.gfm(o), t, tight, refs, o, out))
     case Con{Kid{l, BHead{+lv, t}}, rest}:
-      r.go(rest, tight, refs, safe, put(">\n", put(U32.show(lv), put("</h", put(inline(t, refs, safe), put(">", put(U32.show(lv), put("<h", cr(out)))))))))
+      r.go(rest, tight, refs, o, put(">\n", put(U32.show(lv), put("</h", put(inline(t, refs, o), put(">", put(U32.show(lv), put("<h", cr(out)))))))))
     case Con{Kid{l, BCode{info, t}}, rest}:
-      r.go(rest, tight, refs, safe, put("</code></pre>\n", put(esc(t), put(code_open(info), cr(out)))))
+      r.go(rest, tight, refs, o, put("</code></pre>\n", put(esc(t), put(code_open(info), cr(out)))))
     case Con{Kid{l, BHtml{t}}, rest}:
-      r.go(rest, tight, refs, safe, cr(put(raw_or_omit(safe, t), cr(out))))
+      r.go(rest, tight, refs, o, cr(put(html_out(o, t), cr(out))))
     case Con{Kid{l, BRule{}}, rest}:
-      r.go(rest, tight, refs, safe, put("<hr />\n", cr(out)))
+      r.go(rest, tight, refs, o, put("<hr />\n", cr(out)))
     case Con{Kid{l, BQuote{inner}}, rest}:
-      r.go(rest, tight, refs, safe, put("</blockquote>\n", cr(r.go(inner, False{}, refs, safe, put("<blockquote>\n", cr(out))))))
+      r.go(rest, tight, refs, o, put("</blockquote>\n", cr(r.go(inner, False{}, refs, o, put("<blockquote>\n", cr(out))))))
     case Con{Kid{l, BList{+ord, start, lt, items}}, rest}:
-      r.go(rest, tight, refs, safe, put(Bool.pick(String, ord, "</ol>\n", "</ul>\n"), r.go(items, lt, refs, safe, put(list_open(ord, start), cr(out)))))
+      r.go(rest, tight, refs, o, put(Bool.pick(String, ord, "</ol>\n", "</ul>\n"), r.go(items, lt, refs, o, put(list_open(ord, start), cr(out)))))
+    case Con{Kid{l, BItem{k, s, Con{Kid{l2, BPara{+t}}, more}}}, rest}:
+      +tk = task.kind(o.gfm(o), t)
+      +first = r.first(Bool.not(eq(tk, 0)), tk, t, tight, refs, o, put("<li>", cr(out)))
+      r.go(rest, tight, refs, o, put("</li>\n", r.go(more, tight, refs, o, first)))
     case Con{Kid{l, BItem{k, s, inner}}, rest}:
-      r.go(rest, tight, refs, safe, put("</li>\n", r.go(inner, tight, refs, safe, put("<li>", cr(out)))))
+      r.go(rest, tight, refs, o, put("</li>\n", r.go(inner, tight, refs, o, put("<li>", cr(out)))))
 
-def render(+safe: Bool, r: List<&2, Kid> & List<&2, Ref>) -> String:
+def render(+o: Opts, r: List<&2, Kid> & List<&2, Ref>) -> String:
   (ks, refs) = r
-  String.reverse(r.go(ks, False{}, refs, safe, SNil{}))
+  String.reverse(r.go(ks, False{}, refs, o, SNil{}))
+
+# Markdown to HTML with options: o.safe for untrusted input, o.gfm for GitHub tables, task lists, strikethrough, extended autolinks, and the tag filter.
+def to_html_with(o: Opts, s: String) -> String:
+  render(o, blocks(s))
 
 # CommonMark to HTML. Raw HTML and every URL pass through, as the spec requires.
 def to_html(s: String) -> String:
-  render(False{}, blocks(s))
+  to_html_with(Opts{False{}, False{}}, s)
 
 # CommonMark to HTML for untrusted input, as cmark renders without --unsafe: raw HTML becomes a comment, and a javascript:, vbscript:, file:, or data: URL becomes empty.
 def to_html_safe(s: String) -> String:
-  render(True{}, blocks(s))
+  to_html_with(Opts{True{}, False{}}, s)

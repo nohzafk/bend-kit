@@ -6,7 +6,7 @@ def esc.clean(
   b1: Bool, b2: Bool, b3: Bool, b4: Bool, +c: U32, +r: String,
   e2: {b2 == U32.is_eq(c, 60) : Bool}, e3: {b3 == U32.is_eq(c, 62) : Bool}, e4: {b4 == U32.is_eq(c, 34) : Bool},
   ih: {Laws.clean(r) == True{} : Bool}
-) -> {Laws.clean(Bool.pick(String, b1, "&amp;" ++ r, Bool.pick(String, b2, "&lt;" ++ r, Bool.pick(String, b3, "&gt;" ++ r, Bool.pick(String, b4, "&quot;" ++ r, SCon{Chr{c}, r}))))) == True{} : Bool}:
+) -> {Laws.clean(M.esc.pick(b1, b2, b3, b4, Chr{c}, r)) == True{} : Bool}:
   match b1 b2 b3 b4:
     case True{} _ _ _:
       ih
@@ -34,7 +34,7 @@ def esc.amp(
   b1: Bool, b2: Bool, b3: Bool, b4: Bool, +c: U32, +r: String,
   e1: {b1 == U32.is_eq(c, 38) : Bool},
   ih: {Laws.amp_ok(r) == True{} : Bool}
-) -> {Laws.amp_ok(Bool.pick(String, b1, "&amp;" ++ r, Bool.pick(String, b2, "&lt;" ++ r, Bool.pick(String, b3, "&gt;" ++ r, Bool.pick(String, b4, "&quot;" ++ r, SCon{Chr{c}, r}))))) == True{} : Bool}:
+) -> {Laws.amp_ok(M.esc.pick(b1, b2, b3, b4, Chr{c}, r)) == True{} : Bool}:
   match b1 b2 b3 b4:
     case True{} _ _ _:
       ih
@@ -75,6 +75,30 @@ def Laws.safe_data_other():
   {==}
 
 def Laws.safe_plain_link_kept():
+  {==}
+
+def Laws.gfm_table():
+  {==}
+
+def Laws.gfm_table_off():
+  {==}
+
+def Laws.gfm_task_list():
+  {==}
+
+def Laws.gfm_strikethrough():
+  {==}
+
+def Laws.gfm_strikethrough_off():
+  {==}
+
+def Laws.gfm_autolink():
+  {==}
+
+def Laws.gfm_autolink_safe():
+  {==}
+
+def Laws.gfm_tagfilter():
   {==}
 
 def Laws.escape_text():

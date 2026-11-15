@@ -10,6 +10,16 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 - `lemmas` 0.1.3.0: prove Word shift and carry equations, multiplication modulo `2^n`, exact bounded U32 multiplication, and wrapped subtraction. Prove the U32 division-prefix invariant, quotient equation, remainder bound, and exact bridges to Nat division and remainder for every positive divisor.
 - `stats` 0.1.5.0: prove universal gcd divisibility, lcm common-multiple results, and integer square-root bounds over Nat. The gcd fuel fallback returns `1`; U32 inputs finish before it. Integer square root adds each halved trial step instead of setting a bit. Public results stay unchanged.
+- `jwt` 0.12.0.0, `oauth2` 0.12.0.0: import `hairpin` 0.14.1.0, `http` 0.38.6.0, and `json` 0.7.2.0. The hairpin and http types change, so this is breaking for callers that pass them.
+- `llm` 0.14.0.0: import `hairpin` 0.14.1.0, `http` 0.38.6.0, `json` 0.7.2.0, and `retry` 0.3.0.0. A match on `Retry.Outcome` needs a `Rejected` case. Breaking.
+- `sigv4` 0.12.0.0, `webhooks` 0.12.0.0: import `hairpin` 0.14.1.0, `http` 0.38.6.0, and `retry` 0.3.0.0. A match on `Retry.Outcome` needs a `Rejected` case. Breaking.
+- `markdown` 0.3.1.0: render 2.3 times faster. The bench takes 135.2 ms for 10 renders, down from 311.8 ms; markdown-it-py takes 239.1 ms. The block parser, the HTML escape, and the URL encoder no longer build the branch that `Bool.pick` discards. Output does not change. No API change.
+- `camber` 0.15.1.0: import `http` 0.38.6.0 and `json` 0.7.2.0. No API change.
+- `hairpin` 0.14.1.0: import `http` 0.38.6.0 and `json` 0.7.2.0. No API change.
+- `markdown` 0.3.0.0: add the GitHub Flavored Markdown extensions behind `to_html_with(Opts{safe, gfm}, s)`: tables, task list items, strikethrough, extended autolinks, and the tag filter. All 24 extension examples of the cmark-gfm 0.29 spec pass; plain and safe output do not change. `render` takes `Opts` in place of the safe flag. Breaking.
+- `protobuf` 0.2.1.0: import `f64` 0.1.3.0 and `bytes` 0.3.3.0. The generator emits the same pins. No API change.
+- `http` 0.38.6.0: import `json` 0.7.2.0 and `zlib` 0.5.1.1. No API change.
+- `migrate` 0.3.1.0: import `json` 0.7.2.0. No API change.
 - `template` 0.2.0.0: support partials. `render_with` takes a map of parsed partials; a standalone partial tag indents the partial, and nesting stops at 64 levels. `Node` gains `NPart`, so a match over `Node` needs a new arm. All 12 tests of the spec's partials file pass, as do the two partial tests in its delimiters file. Breaking.
 - `markdown` 0.2.0.0: add `to_html_safe` for untrusted input. It renders as cmark does without `--unsafe`: raw HTML becomes `<!-- raw HTML omitted -->`, and a `javascript:`, `vbscript:`, `file:`, or non-image `data:` URL becomes empty. It matches cmark 0.31.2 on all 652 spec inputs. `render` takes the safe flag first. Breaking.
 - `template` 0.1.1.0: support set-delimiter tags such as `{{=<% %>=}}`. The 12 delimiters tests of the Mustache spec that use no partials pass.
