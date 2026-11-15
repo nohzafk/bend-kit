@@ -315,11 +315,11 @@ def Stats.linear_regression(+xs: List<&2, F.F64>, +ys: List<&2, F.F64>) -> Maybe
   +n = List.length(&2, F.F64, xs)
   Stats.regress.if(Bool.and(Nat.is_eq(n, List.length(&2, F.F64, ys)), Nat.is_lt(1n, n)), xs, ys)
 
-# 48 steps cover U32: consecutive Fibonacci numbers below 2^32 need 46.
+# 48 steps suffice for U32; the exhaustion branch is unreachable from U32.gcd.
 def U32.gcd.go(k: Nat, z: Bool, +a: U32, +b: U32) -> U32:
   match k z:
     case 0n _:
-      a
+      1
     case 1n+p True{}:
       a
     case 1n+p False{}:
@@ -350,14 +350,15 @@ def U32.isqrt.pick(ok: Bool, c: U32, r: U32) -> U32:
     case False{}:
       r
 
-def U32.isqrt.go(+k: Nat, +n: U32, +r: U32) -> U32:
+def U32.isqrt.go(+k: Nat, +n: U32, +r: U32, +step: U32) -> U32:
   match k:
     case 0n:
       r
     case 1n+p:
-      +c = (r .|. (1 << p) : U32)
-      U32.isqrt.go(p, n, U32.isqrt.pick(U32.is_le((c * c : U32), n), c, r))
+      +half = U32.div(step, 2)
+      +c = (r + half : U32)
+      U32.isqrt.go(p, n, U32.isqrt.pick(U32.is_le((c * c : U32), n), c, r), half)
 
 # The floor of the square root.
 def U32.isqrt(+n: U32) -> U32:
-  U32.isqrt.go(16n, n, 0)
+  U32.isqrt.go(16n, n, 0, 65536)
