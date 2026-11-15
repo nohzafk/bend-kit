@@ -26,6 +26,27 @@ law escape_entity_kept:
 law raw_html_kept:
   {M.to_html("<b class=\"x\">&</b>\n") == "<p><b class=\"x\">&amp;</b></p>\n" : String}
 
+law safe_html_block:
+  {M.to_html_safe("<div>\nraw\n</div>\n") == "<!-- raw HTML omitted -->\n" : String}
+
+law safe_inline_html:
+  {M.to_html_safe("a <b onclick=\"x\">b</b>\n") == "<p>a <!-- raw HTML omitted -->b<!-- raw HTML omitted --></p>\n" : String}
+
+law safe_javascript_link:
+  {M.to_html_safe("[a](JavaScript:alert(1))\n") == "<p><a href=\"\">a</a></p>\n" : String}
+
+law safe_autolink:
+  {M.to_html_safe("<vbscript:x>\n") == "<p><a href=\"\">vbscript:x</a></p>\n" : String}
+
+law safe_data_png_kept:
+  {M.to_html_safe("![i](data:image/png;base64,AA)\n") == "<p><img src=\"data:image/png;base64,AA\" alt=\"i\" /></p>\n" : String}
+
+law safe_data_other:
+  {M.to_html_safe("![i](data:text/html,x)\n") == "<p><img src=\"\" alt=\"i\" /></p>\n" : String}
+
+law safe_plain_link_kept:
+  {M.to_html_safe("[a](https://x.org/?q=1)\n") == "<p><a href=\"https://x.org/?q=1\">a</a></p>\n" : String}
+
 # A sample of the CommonMark 0.31.2 spec examples; conformance.py runs all of them.
 law spec_1:
   {M.to_html("\u{9}foo\u{9}baz\u{9}\u{9}bim\n") == "<pre><code>foo\u{9}baz\u{9}\u{9}bim\n</code></pre>\n" : String}

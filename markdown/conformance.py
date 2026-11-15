@@ -3,6 +3,7 @@
 
 python3 conformance.py            # pass count per section
 python3 conformance.py Links      # also print the failures in one section
+python3 conformance.py --safe     # to_html_safe against cmark without --unsafe (needs cmark on PATH)
 """
 import json
 import os
@@ -29,10 +30,17 @@ import ../markdown.bend as M
 
 
 def main():
-    show = sys.argv[1] if len(sys.argv) > 1 else None
+    args = sys.argv[1:]
+    safe = "--safe" in args
+    args = [a for a in args if a != "--safe"]
+    show = args[0] if args else None
     OUT.mkdir(exist_ok=True)
     cases = json.load(urllib.request.urlopen(SPEC))
-    body = "".join(f"def c{i}() -> String:\n  M.to_html({lit(t['markdown'])})\n\n" for i, t in enumerate(cases))
+    if safe:
+        for t in cases:
+            t["html"] = subprocess.run(["cmark"], input=t["markdown"].encode(), capture_output=True, check=True).stdout.decode()
+    fn = "M.to_html_safe" if safe else "M.to_html"
+    body = "".join(f"def c{i}() -> String:\n  {fn}({lit(t['markdown'])})\n\n" for i, t in enumerate(cases))
     main = "def main() -> IO(Unit):\n  do IO<Unit>:\n" + "".join(f"    IO.print(c{i}() ++ {lit(END)})\n" for i in range(len(cases)))
     (OUT / "conformance.bend").write_text(HEAD + body + main)
     env = {**os.environ, "BEND_NO_TELEMETRY": "1"}
