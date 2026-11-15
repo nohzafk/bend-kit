@@ -3,7 +3,7 @@
 Descriptive statistics over `F64` lists: sum, mean, variance, standard deviation, quantiles, a histogram, and least-squares linear regression. Also `U32` gcd, lcm, and integer square root.
 
 ```bend
-import bend-kit-stats@0.1.4.0/stats.bend as S
+import bend-kit-stats@0.1.5.0/stats.bend as S
 ```
 
 It imports `bend-kit-f64@0.1.3.0`. Pass it values of that `F64` type.
@@ -13,7 +13,7 @@ It imports `bend-kit-f64@0.1.3.0`. Pass it values of that `F64` type.
 ```bend
 import Base
 import bend-kit-f64@0.1.3.0/f64.bend as F
-import bend-kit-stats@0.1.4.0/stats.bend as S
+import bend-kit-stats@0.1.5.0/stats.bend as S
 
 def n(k: U32) -> F.F64:
   F.F64.from_u32(k)
@@ -73,7 +73,7 @@ A `NaN` in the input gives a `NaN` mean and variance, and an unspecified quantil
 
 `gcd_symmetric` proves `gcd(a, b) = gcd(b, a)` for every `U32` pair. The implementation orders the arguments before Euclid's loop, so commutativity of `min` and `max` proves the law.
 
-The universal gcd and lcm divisibility laws and the natural-number square-root bounds are omitted, infeasible now. A structural multiplication proof reached the missing shift/modulo congruence step. A division proof reached the missing carry and remainder-bound invariant. Neither `lemmas` nor mathlib supplies these U32 multiplication and division bridges. The fixture laws remain unchanged; no law is left open.
+`gcd_divides` proves that the gcd divides both inputs for every `U32` pair. `lcm_divisible` proves that every `Some{m}` result is divisible by both inputs. `Divides(d, n)` means `Nat.mod(n, d) == 0`; this includes `0` dividing `0`. `isqrt_bounds` proves `r*r <= n < (r+1)*(r+1)` over `Nat`, where `r = U32.isqrt(n)`. These proofs use the local `lemmas` bridges for multiplication, division, and remainder. The square-root proof keeps each candidate below `65536`, so its square does not wrap.
 
 `check.bend` compares every valid quantile with the prior stable-sort formula on all 781 lists of length 0 through 4 over `-1`, `-0`, `+0`, `1`, and `2`. It checks denominators 1 through 4 and three ranks at denominator 65536, with exact bit comparisons. It also forces the sort fallback and its carried successor.
 

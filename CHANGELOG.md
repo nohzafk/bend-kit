@@ -8,6 +8,8 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `lemmas` 0.1.3.0: prove Word shift and carry equations, multiplication modulo `2^n`, exact bounded U32 multiplication, and wrapped subtraction. Prove the U32 division-prefix invariant, quotient equation, remainder bound, and exact bridges to Nat division and remainder for every positive divisor.
+- `stats` 0.1.5.0: prove universal gcd divisibility, lcm common-multiple results, and integer square-root bounds over Nat. The gcd fuel fallback returns `1`; U32 inputs finish before it. Integer square root adds each halved trial step instead of setting a bit. Public results stay unchanged.
 - `jwt` 0.12.0.0, `oauth2` 0.12.0.0: import `hairpin` 0.14.1.0, `http` 0.38.6.0, and `json` 0.7.2.0. The hairpin and http types change, so this is breaking for callers that pass them.
 - `llm` 0.14.0.0: import `hairpin` 0.14.1.0, `http` 0.38.6.0, `json` 0.7.2.0, and `retry` 0.3.0.0. A match on `Retry.Outcome` needs a `Rejected` case. Breaking.
 - `sigv4` 0.12.0.0, `webhooks` 0.12.0.0: import `hairpin` 0.14.1.0, `http` 0.38.6.0, and `retry` 0.3.0.0. A match on `Retry.Outcome` needs a `Rejected` case. Breaking.

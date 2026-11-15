@@ -1,6 +1,7 @@
 import Base
 import bend-kit-f64@0.1.3.0/f64.bend as F
 import ./stats.bend as S
+import bend-mathlib@0.8.0.0/nat.bend as N
 
 def n(k: U32) -> F.F64:
   F.F64.from_u32(k)
@@ -169,3 +170,31 @@ law histogram_nan:
 
 law histogram_duplicate_edges:
   {S.Stats.histogram([n(0), n(1), n(1), n(2)], [n(0), n(1), n(2)]) == [1, 0, 2] : List<&2, U32>}
+
+def Divides(+d: Nat, +n: Nat) -> Data:
+  {Nat.mod(n, d) == 0n : Nat}
+
+law gcd_divides:
+  for +a: U32
+  for +b: U32
+  Divides(U32.to_nat(S.U32.gcd(a, b)), U32.to_nat(a)) &
+    Divides(U32.to_nat(S.U32.gcd(a, b)), U32.to_nat(b))
+
+def CommonMultiple(+a: U32, +b: U32, result: Maybe<&2, U32>) -> Type:
+  match result:
+    case None{}:
+      Unit
+    case Some{+m}:
+      Divides(U32.to_nat(a), U32.to_nat(m)) & Divides(U32.to_nat(b), U32.to_nat(m))
+
+law lcm_divisible:
+  for +a: U32
+  for +b: U32
+  CommonMultiple(a, b, S.U32.lcm(a, b))
+
+def SqrtBounds(+n: Nat, +r: Nat) -> Type:
+  N.le(Nat.mul(r, r), n) & N.lt(n, Nat.mul(1n+r, 1n+r))
+
+law isqrt_bounds:
+  for +n: U32
+  SqrtBounds(U32.to_nat(n), U32.to_nat(S.U32.isqrt(n)))
