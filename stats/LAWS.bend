@@ -180,6 +180,15 @@ law gcd_divides:
   Divides(U32.to_nat(S.U32.gcd(a, b)), U32.to_nat(a)) &
     Divides(U32.to_nat(S.U32.gcd(a, b)), U32.to_nat(b))
 
+law gcd_greatest:
+  for +a: U32
+  for +b: U32
+  for +d: Nat
+  for ha: Divides(d, U32.to_nat(a))
+  for hb: Divides(d, U32.to_nat(b))
+  Divides(d, U32.to_nat(S.U32.gcd(a, b)))
+
+
 def CommonMultiple(+a: U32, +b: U32, result: Maybe<&2, U32>) -> Type:
   match result:
     case None{}:
@@ -191,6 +200,22 @@ law lcm_divisible:
   for +a: U32
   for +b: U32
   CommonMultiple(a, b, S.U32.lcm(a, b))
+
+def LeastMultiple(+c: Nat, result: Maybe<&2, U32>) -> Type:
+  match result:
+    case None{}:
+      Unit
+    case Some{+m}:
+      Divides(U32.to_nat(m), c)
+
+law lcm_least:
+  for +a: U32
+  for +b: U32
+  for +c: Nat
+  for ha: Divides(U32.to_nat(a), c)
+  for hb: Divides(U32.to_nat(b), c)
+  LeastMultiple(c, S.U32.lcm(a, b))
+
 
 def SqrtBounds(+n: Nat, +r: Nat) -> Type:
   N.le(Nat.mul(r, r), n) & N.lt(n, Nat.mul(1n+r, 1n+r))

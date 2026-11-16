@@ -155,9 +155,9 @@ def max_comm(+a: U32, +b: U32) -> {U32.max(a, b) == U32.max(b, a) : U32}:
 
 def Laws.gcd_symmetric(a, b):
   %Equal.sym(U32, U32.min(a, b), U32.min(b, a), min_comm(a, b)) :
-    {S.U32.gcd.go(48n, U32.is_zero(_), U32.max(a, b), _) == S.U32.gcd(b, a) : U32}
+    {S.U32.gcd.go(65n, U32.is_zero(_), U32.max(a, b), _) == S.U32.gcd(b, a) : U32}
   %Equal.sym(U32, U32.max(a, b), U32.max(b, a), max_comm(a, b)) :
-    {S.U32.gcd.go(48n, U32.is_zero(U32.min(b, a)), _, U32.min(b, a)) == S.U32.gcd(b, a) : U32}
+    {S.U32.gcd.go(65n, U32.is_zero(U32.min(b, a)), _, U32.min(b, a)) == S.U32.gcd(b, a) : U32}
   {==}
 
 def Laws.histogram_empty_edges():
@@ -245,7 +245,7 @@ def gcd_ordered(+a: U32, +b: U32, h: Laws.Divides(U32.to_nat(S.U32.gcd(a, b)), U
       gcd_ordered_pick(U32.is_lt(U32{x}, U32{y}), U32{x}, U32{y}, U32.to_nat(S.U32.gcd(U32{x}, U32{y})), h)
 
 def Laws.gcd_divides(a, b):
-  gcd_ordered(a, b, gcd_go_divides(48n, U32.is_zero(U32.min(a, b)), U32.max(a, b), U32.min(a, b), {==}))
+  gcd_ordered(a, b, gcd_go_divides(65n, U32.is_zero(U32.min(a, b)), U32.max(a, b), U32.min(a, b), {==}))
 
 def divides_quotient(+d: Nat, +a: Nat, h: Laws.Divides(d, a)) -> {Nat.mul(Nat.div(a, d), d) == a : Nat}:
   %N.add_zero(Nat.mul(Nat.div(a, d), d)) : {_ == a : Nat}
@@ -348,6 +348,290 @@ def lcm_of(+a: U32, +b: U32, h: Laws.Divides(U32.to_nat(S.U32.gcd(a, b)), U32.to
 
 def Laws.lcm_divisible(a, b):
   lcm_of(a, b, Laws.gcd_divides(a, b))
+
+def remainder_halves(+q: Nat, +r: Nat, +a: Nat, +b: Nat,
+  e: {Nat.add(Nat.mul(q, b), r) == a : Nat}, hr: N.lt(r, b), hb: N.le(b, a)) ->
+  N.lt(Nat.double(r), a):
+  match q:
+    case 0n:
+      Empty.absurd(N.lt(Nat.double(r), a),
+        N.lt_irrefl(a)(N.lt_of_lt_of_le(a, b, a,
+          (%e : N.lt(_, b); hr), hb)))
+    case 1n+p:
+      %N.double_eq_add_sym(r) : N.lt(_, a)
+      N.lt_of_lt_of_le(Nat.add(r, r), Nat.add(b, r), a,
+        N.add_lt_add_right(r, b, r, hr),
+        N.le_of_add_eq(Nat.add(b, r), Nat.mul(p, b), a,
+          (
+            %e : {Nat.add(Nat.add(b, r), Nat.mul(p, b)) == _ : Nat}
+            %Equal.sym(Nat, Nat.add(Nat.add(b, r), Nat.mul(p, b)), Nat.add(b, Nat.add(r, Nat.mul(p, b))),
+              N.add_assoc(b, r, Nat.mul(p, b))) : {_ == Nat.add(Nat.mul(1n+p, b), r) : Nat}
+            %N.add_comm(Nat.mul(p, b), r) : {Nat.add(b, _) == Nat.add(Nat.mul(1n+p, b), r) : Nat}
+            Equal.sym(Nat, Nat.add(Nat.add(b, Nat.mul(p, b)), r), Nat.add(b, Nat.add(Nat.mul(p, b), r)),
+              N.add_assoc(b, Nat.mul(p, b), r))
+          )))
+
+def divmod_equation(+a: U32, +b: U32,
+  qr: {Nat.add(Nat.mul(U32.to_nat(U32.div(a, b)), U32.to_nat(b)), U32.to_nat(U32.mod(a, b))) == U32.to_nat(a) : Nat} &
+    N.lt(U32.to_nat(U32.mod(a, b)), U32.to_nat(b))) ->
+  {Nat.add(Nat.mul(U32.to_nat(U32.div(a, b)), U32.to_nat(b)), U32.to_nat(U32.mod(a, b))) == U32.to_nat(a) : Nat}:
+  (e, h) = qr
+  e
+
+def divmod_bound(+a: U32, +b: U32,
+  qr: {Nat.add(Nat.mul(U32.to_nat(U32.div(a, b)), U32.to_nat(b)), U32.to_nat(U32.mod(a, b))) == U32.to_nat(a) : Nat} &
+    N.lt(U32.to_nat(U32.mod(a, b)), U32.to_nat(b))) ->
+  N.lt(U32.to_nat(U32.mod(a, b)), U32.to_nat(b)):
+  (e, h) = qr
+  h
+
+def scaled_equation(+s: Nat, +q: Nat, +b: Nat, +r: Nat, +a: Nat,
+  e: {Nat.add(Nat.mul(q, b), r) == a : Nat}) ->
+  {Nat.add(Nat.mul(q, Nat.mul(s, b)), Nat.mul(s, r)) == Nat.mul(s, a) : Nat}:
+  %e : {Nat.add(Nat.mul(q, Nat.mul(s, b)), Nat.mul(s, r)) == Nat.mul(s, _) : Nat}
+  %N.mul_add_sym(s, Nat.mul(q, b), r) :
+    {Nat.add(Nat.mul(q, Nat.mul(s, b)), Nat.mul(s, r)) == _ : Nat}
+  Equal.cong(Nat, Nat, x => Nat.add(x, Nat.mul(s, r)),
+    Nat.mul(q, Nat.mul(s, b)), Nat.mul(s, Nat.mul(q, b)),
+    Equal.trans(Nat, Nat.mul(q, Nat.mul(s, b)), Nat.mul(Nat.mul(q, s), b), Nat.mul(s, Nat.mul(q, b)),
+      Equal.sym(Nat, Nat.mul(Nat.mul(q, s), b), Nat.mul(q, Nat.mul(s, b)), N.mul_assoc(q, s, b)),
+      Equal.trans(Nat, Nat.mul(Nat.mul(q, s), b), Nat.mul(Nat.mul(s, q), b), Nat.mul(s, Nat.mul(q, b)),
+        Equal.cong(Nat, Nat, x => Nat.mul(x, b), Nat.mul(q, s), Nat.mul(s, q), N.mul_comm(q, s)),
+        N.mul_assoc(s, q, b))))
+
+def common_remainder(+s: Nat, +d: Nat, +a: U32, +b: U32,
+  ha: Laws.Divides(d, Nat.mul(s, U32.to_nat(a))), hb: Laws.Divides(d, Nat.mul(s, U32.to_nat(b))),
+  pos: N.lt(0n, U32.to_nat(b))) -> Laws.Divides(d, Nat.mul(s, U32.to_nat(U32.mod(a, b)))):
+  +q = U32.to_nat(U32.div(a, b))
+  +r = Nat.mul(s, U32.to_nat(U32.mod(a, b)))
+  +v = Nat.mul(s, U32.to_nat(b))
+  +w = Nat.mul(s, U32.to_nat(a))
+  +e = scaled_equation(s, q, U32.to_nat(b), U32.to_nat(U32.mod(a, b)), U32.to_nat(a),
+    divmod_equation(a, b, L.u32_divmod_nat(a, b, pos)))
+  +step : {Nat.mod(r, d) == Nat.mod(w, d) : Nat} = (
+    %e : {Nat.mod(r, d) == Nat.mod(_, d) : Nat}
+    %N.add_comm(r, Nat.mul(q, v)) : {Nat.mod(r, d) == Nat.mod(_, d) : Nat}
+    %L.mod_add_product(r, q, v, d) : {Nat.mod(r, d) == _ : Nat}
+    %Equal.sym(Nat, Nat.mod(v, d), 0n, hb) : {Nat.mod(r, d) == Nat.mod(Nat.add(r, Nat.mul(q, _)), d) : Nat}
+    %N.mul_zero_sym(q) : {Nat.mod(r, d) == Nat.mod(Nat.add(r, _), d) : Nat}
+    %N.add_zero_sym(r) : {Nat.mod(r, d) == Nat.mod(_, d) : Nat}
+    {==}
+  )
+  Equal.trans(Nat, Nat.mod(r, d), Nat.mod(w, d), 0n, step, ha)
+ 
+
+def gcd_fuel(+k: Nat) -> Nat:
+  1n+Nat.double(k)
+
+def bool_split(-P: Bool -> Type, +t: Bool,
+  yes: {t == True{} : Bool} -> P(True{}),
+  no: {t == False{} : Bool} -> P(False{})) -> P(t):
+  match t:
+    case True{}:
+      yes({==})
+    case False{}:
+      no({==})
+
+def gcd_greatest_go(+k: Nat, +z: Bool, +a: U32, +b: U32, +s: Nat, +d: Nat,
+  hz: {z == U32.is_zero(b) : Bool}, order: N.le(U32.to_nat(b), U32.to_nat(a)),
+  bound: N.lt(U32.to_nat(a), L.pow2(k)),
+  +ha: Laws.Divides(d, Nat.mul(s, U32.to_nat(a))), +hb: Laws.Divides(d, Nat.mul(s, U32.to_nat(b)))) ->
+  Laws.Divides(d, Nat.mul(s, U32.to_nat(S.U32.gcd.go(gcd_fuel(k), z, a, b)))):
+  match k z:
+    case 0n True{}:
+      ha
+    case 0n False{}:
+      +ea = N.le_zero_eq(U32.to_nat(a), N.le_of_lt_succ(U32.to_nat(a), 0n, bound))
+      Empty.absurd(Laws.Divides(d, Nat.mul(s, U32.to_nat(S.U32.gcd.go(gcd_fuel(0n), False{}, a, b)))),
+        N.lt_zero(0n)(N.lt_of_lt_of_le(0n, U32.to_nat(b), 0n,
+          nonzero_test_value(b, Equal.sym(Bool, False{}, U32.is_zero(b), hz)),
+          (%ea : N.le(U32.to_nat(b), _); order))))
+    case 1n+p True{}:
+      ha
+    case 1n+p False{}:
+      +pos = nonzero_test_value(b, Equal.sym(Bool, False{}, U32.is_zero(b), hz))
+      +r = U32.mod(a, b)
+      +e = divmod_equation(a, b, L.u32_divmod_nat(a, b, pos))
+      +hr = divmod_bound(a, b, L.u32_divmod_nat(a, b, pos))
+      bool_split(t => Laws.Divides(d, Nat.mul(s, U32.to_nat(S.U32.gcd.go(2n+Nat.double(p), t, b, r)))), U32.is_zero(r),
+        yes => (
+          hb
+        ),
+        no => (
+          +rpos = nonzero_test_value(r, no)
+          gcd_greatest_go(p, U32.is_zero(U32.mod(b, r)), r, U32.mod(b, r), s, d, {==},
+            N.le_of_lt(U32.to_nat(U32.mod(b, r)), U32.to_nat(r),
+              divmod_bound(b, r, L.u32_divmod_nat(b, r, rpos))),
+            L.lt_of_double_lt(U32.to_nat(r), L.pow2(p),
+              N.lt_trans(Nat.double(U32.to_nat(r)), U32.to_nat(a), L.pow2(1n+p),
+                remainder_halves(U32.to_nat(U32.div(a, b)), U32.to_nat(r), U32.to_nat(a), U32.to_nat(b), e, hr, order), bound)),
+            common_remainder(s, d, a, b, ha, hb, pos),
+            common_remainder(s, d, b, r, hb, common_remainder(s, d, a, b, ha, hb, pos), rpos))
+        ))
+
+def greatest_ordered(+a: U32, +b: U32, +s: Nat, +d: Nat,
+  h: Laws.Divides(d, Nat.mul(s, U32.to_nat(U32.max(a, b)))) & Laws.Divides(d, Nat.mul(s, U32.to_nat(U32.min(a, b))))) ->
+  Laws.Divides(d, Nat.mul(s, U32.to_nat(S.U32.gcd(a, b)))):
+  (ha, hb) = h
+  gcd_greatest_go(32n, U32.is_zero(U32.min(a, b)), U32.max(a, b), U32.min(a, b), s, d, {==},
+    (
+      %Equal.sym(Nat, U32.to_nat(U32.min(a, b)), Nat.min(U32.to_nat(a), U32.to_nat(b)), U.u32_min_to_nat(a, b)) :
+        N.le(_, U32.to_nat(U32.max(a, b)))
+      %Equal.sym(Nat, U32.to_nat(U32.max(a, b)), Nat.max(U32.to_nat(a), U32.to_nat(b)), U.u32_max_to_nat(a, b)) :
+        N.le(Nat.min(U32.to_nat(a), U32.to_nat(b)), _)
+      N.le_trans(Nat.min(U32.to_nat(a), U32.to_nat(b)), U32.to_nat(a), Nat.max(U32.to_nat(a), U32.to_nat(b)),
+        N.min_le_left(U32.to_nat(a), U32.to_nat(b)), N.le_max_left(U32.to_nat(a), U32.to_nat(b)))
+    ), L.u32_to_nat_lt(U32.max(a, b)), ha, hb)
+
+def common_ordered(t: Bool, +a: U32, +b: U32, +s: Nat, +d: Nat,
+  ha: Laws.Divides(d, Nat.mul(s, U32.to_nat(a))), hb: Laws.Divides(d, Nat.mul(s, U32.to_nat(b)))) ->
+  Laws.Divides(d, Nat.mul(s, U32.to_nat(Bool.pick(U32, t, b, a)))) &
+    Laws.Divides(d, Nat.mul(s, U32.to_nat(Bool.pick(U32, t, a, b)))):
+  match t:
+    case True{}:
+      (hb, ha)
+    case False{}:
+      (ha, hb)
+
+def gcd_scaled(+a: U32, +b: U32, +s: Nat, +d: Nat,
+  ha: Laws.Divides(d, Nat.mul(s, U32.to_nat(a))), hb: Laws.Divides(d, Nat.mul(s, U32.to_nat(b)))) ->
+  Laws.Divides(d, Nat.mul(s, U32.to_nat(S.U32.gcd(a, b)))):
+  match a b:
+    case U32{+x} U32{+y}:
+      greatest_ordered(U32{x}, U32{y}, s, d,
+        common_ordered(U32.is_lt(U32{x}, U32{y}), U32{x}, U32{y}, s, d, ha, hb))
+
+def Laws.gcd_greatest(a, b, d, ha, hb):
+  %N.one_mul(U32.to_nat(S.U32.gcd(a, b))) : Laws.Divides(d, _)
+  gcd_scaled(a, b, 1n, d,
+    (%Equal.sym(Nat, Nat.mul(1n, U32.to_nat(a)), U32.to_nat(a), N.one_mul(U32.to_nat(a))) : Laws.Divides(d, _); ha),
+    (%Equal.sym(Nat, Nat.mul(1n, U32.to_nat(b)), U32.to_nat(b), N.one_mul(U32.to_nat(b))) : Laws.Divides(d, _); hb))
+
+def mul_exchange(+x: Nat, +y: Nat, +z: Nat) ->
+  {Nat.mul(Nat.mul(x, y), z) == Nat.mul(Nat.mul(x, z), y) : Nat}:
+  Equal.trans(Nat, Nat.mul(Nat.mul(x, y), z), Nat.mul(x, Nat.mul(y, z)), Nat.mul(Nat.mul(x, z), y),
+    N.mul_assoc(x, y, z),
+    Equal.trans(Nat, Nat.mul(x, Nat.mul(y, z)), Nat.mul(x, Nat.mul(z, y)), Nat.mul(Nat.mul(x, z), y),
+      Equal.cong(Nat, Nat, t => Nat.mul(x, t), Nat.mul(y, z), Nat.mul(z, y), N.mul_comm(y, z)),
+      Equal.sym(Nat, Nat.mul(Nat.mul(x, z), y), Nat.mul(x, Nat.mul(z, y)), N.mul_assoc(x, z, y))))
+
+def common_product(+a: Nat, +b: Nat, +c: Nat, h: Laws.Divides(b, c)) ->
+  Laws.Divides(Nat.mul(a, b), Nat.mul(c, a)):
+  +k = Nat.div(c, b)
+  %divides_quotient(b, c, h) : Laws.Divides(Nat.mul(a, b), Nat.mul(_, a))
+  %mul_exchange(k, a, b) : Laws.Divides(Nat.mul(a, b), _)
+  %Equal.sym(Nat, Nat.mul(Nat.mul(k, a), b), Nat.mul(k, Nat.mul(a, b)), N.mul_assoc(k, a, b)) :
+    Laws.Divides(Nat.mul(a, b), _)
+  N.mul_mod_left(k, Nat.mul(a, b))
+
+def positive_cancel(+g: Nat, +x: Nat, +y: Nat, h: N.lt(0n, g),
+  e: {Nat.mul(x, g) == Nat.mul(y, g) : Nat}) -> {x == y : Nat}:
+  match g:
+    case 0n:
+      Empty.absurd({x == y : Nat}, N.lt_irrefl(0n)(h))
+    case 1n+p:
+      Equal.trans(Nat, x, Nat.div(Nat.mul(x, 1n+p), 1n+p), y,
+        Equal.sym(Nat, Nat.div(Nat.mul(x, 1n+p), 1n+p), x, N.mul_div_cancel(x, p)),
+        Equal.trans(Nat, Nat.div(Nat.mul(x, 1n+p), 1n+p), Nat.div(Nat.mul(y, 1n+p), 1n+p), y,
+          Equal.cong(Nat, Nat, t => Nat.div(t, 1n+p), Nat.mul(x, 1n+p), Nat.mul(y, 1n+p), e),
+          N.mul_div_cancel(y, p)))
+
+def divides_cancel(+m: Nat, +c: Nat, +g: Nat, pos: N.lt(0n, g),
+  h: Laws.Divides(Nat.mul(m, g), Nat.mul(c, g))) -> Laws.Divides(m, c):
+  +k = Nat.div(Nat.mul(c, g), Nat.mul(m, g))
+  +e = divides_quotient(Nat.mul(m, g), Nat.mul(c, g), h)
+  +ec = positive_cancel(g, Nat.mul(k, m), c, pos,
+    Equal.trans(Nat, Nat.mul(Nat.mul(k, m), g), Nat.mul(k, Nat.mul(m, g)), Nat.mul(c, g),
+      N.mul_assoc(k, m, g), e))
+  %ec : Laws.Divides(m, _)
+  N.mul_mod_left(k, m)
+
+def least_zero(result: Maybe<&2, U32>, +c: Nat, ec: {c == 0n : Nat}) -> Laws.LeastMultiple(c, result):
+  match result:
+    case None{}:
+      Unit{}
+    case Some{+m}:
+      %Equal.sym(Nat, c, 0n, ec) : Laws.Divides(U32.to_nat(m), _)
+      N.zero_mod(U32.to_nat(m))
+
+def lcm_least_product(+q: U32, +g: U32, +a: U32, +b: U32, +c: Nat,
+  hq: {Nat.mul(U32.to_nat(q), U32.to_nat(g)) == U32.to_nat(a) : Nat},
+  hs: Laws.Divides(Nat.mul(U32.to_nat(a), U32.to_nat(b)), Nat.mul(c, U32.to_nat(g))),
+  pos: N.lt(0n, U32.to_nat(g)),
+  bound: N.lt(Nat.mul(U32.to_nat(q), U32.to_nat(b)), L.pow2(32n))) ->
+  Laws.LeastMultiple(c, Some{U32.mul(q, b)}):
+  %Equal.sym(Nat, U32.to_nat(U32.mul(q, b)), Nat.mul(U32.to_nat(q), U32.to_nat(b)), L.u32_mul_nat(q, b, bound)) :
+    Laws.Divides(_, c)
+  divides_cancel(Nat.mul(U32.to_nat(q), U32.to_nat(b)), c, U32.to_nat(g), pos,
+    (
+      %mul_exchange(U32.to_nat(q), U32.to_nat(g), U32.to_nat(b)) :
+        Laws.Divides(_, Nat.mul(c, U32.to_nat(g)))
+      %Equal.sym(Nat, Nat.mul(U32.to_nat(q), U32.to_nat(g)), U32.to_nat(a), hq) :
+        Laws.Divides(Nat.mul(_, U32.to_nat(b)), Nat.mul(c, U32.to_nat(g)))
+      hs
+    ))
+
+def lcm_least_guard(z: Bool, ov: Bool, +q: U32, +g: U32, +a: U32, +b: U32, +c: Nat,
+  hz: {z == U32.is_zero(b) : Bool},
+  hov: {ov == Bool.and(Bool.not(z), U32.is_gt(q, U32.div(4294967295, b))) : Bool},
+  hq: {Nat.mul(U32.to_nat(q), U32.to_nat(g)) == U32.to_nat(a) : Nat},
+  hs: Laws.Divides(Nat.mul(U32.to_nat(a), U32.to_nat(b)), Nat.mul(c, U32.to_nat(g))),
+  hb: Laws.Divides(U32.to_nat(b), c), pos: N.lt(0n, U32.to_nat(g))) ->
+  Laws.LeastMultiple(c, S.U32.lcm.if(ov, q, b)):
+  match z ov:
+    case True{} True{}:
+      Empty.absurd(Unit, N.succ_ne_zero(0n)(Equal.cong(Bool, Nat, L.b2n, True{}, False{}, hov)))
+    case True{} False{}:
+      least_zero(Some{U32.mul(q, b)}, c,
+        (
+          %zero_test_value(b, Equal.sym(Bool, True{}, U32.is_zero(b), hz)) : Laws.Divides(_, c)
+          hb
+        ))
+    case False{} True{}:
+      Unit{}
+    case False{} False{}:
+      lcm_least_product(q, g, a, b, c, hq, hs, pos,
+        lcm_bound(q, b, nonzero_test_value(b, Equal.sym(Bool, False{}, U32.is_zero(b), hz)),
+          Equal.sym(Bool, False{}, U32.is_gt(q, U32.div(4294967295, b)), hov)))
+
+def lcm_least_gcd(z: Bool, +a: U32, +b: U32, +c: Nat,
+  +hz: {z == U32.is_zero(S.U32.gcd(a, b)) : Bool},
+  ha: Laws.Divides(U32.to_nat(a), c), +hb: Laws.Divides(U32.to_nat(b), c),
+  +hg: Laws.Divides(U32.to_nat(S.U32.gcd(a, b)), U32.to_nat(a))) ->
+  Laws.LeastMultiple(c, S.U32.lcm(a, b)):
+  match z:
+    case True{}:
+      +ea : {U32.to_nat(a) == 0n : Nat} = (
+        %zero_test_value(S.U32.gcd(a, b), Equal.sym(Bool, True{}, U32.is_zero(S.U32.gcd(a, b)), hz)) :
+          Laws.Divides(_, U32.to_nat(a))
+        hg
+      )
+      least_zero(S.U32.lcm(a, b), c,
+        (%ea : Laws.Divides(_, c); ha))
+    case False{}:
+      lcm_least_guard(U32.is_zero(b),
+        Bool.and(Bool.not(U32.is_zero(b)), U32.is_gt(U32.div(a, S.U32.gcd(a, b)), U32.div(4294967295, b))),
+        U32.div(a, S.U32.gcd(a, b)), S.U32.gcd(a, b), a, b, c, {==}, {==},
+        quotient_exact(False{}, a, S.U32.gcd(a, b), hz, hg),
+        gcd_scaled(a, b, c, Nat.mul(U32.to_nat(a), U32.to_nat(b)),
+          common_product(U32.to_nat(a), U32.to_nat(b), c, hb),
+          (
+            %Equal.sym(Nat, Nat.mul(U32.to_nat(a), U32.to_nat(b)), Nat.mul(U32.to_nat(b), U32.to_nat(a)),
+              N.mul_comm(U32.to_nat(a), U32.to_nat(b))) : Laws.Divides(_, Nat.mul(c, U32.to_nat(b)))
+            common_product(U32.to_nat(b), U32.to_nat(a), c, ha)
+          )),
+        hb, nonzero_test_value(S.U32.gcd(a, b), Equal.sym(Bool, False{}, U32.is_zero(S.U32.gcd(a, b)), hz)))
+
+def lcm_least_inputs(+a: U32, +b: U32, +c: Nat,
+  ha: Laws.Divides(U32.to_nat(a), c), hb: Laws.Divides(U32.to_nat(b), c),
+  h: Laws.Divides(U32.to_nat(S.U32.gcd(a, b)), U32.to_nat(a)) &
+    Laws.Divides(U32.to_nat(S.U32.gcd(a, b)), U32.to_nat(b))) ->
+  Laws.LeastMultiple(c, S.U32.lcm(a, b)):
+  (hg, unused) = h
+  lcm_least_gcd(U32.is_zero(S.U32.gcd(a, b)), a, b, c, {==}, ha, hb, hg)
+
+def Laws.lcm_least(a, b, c, ha, hb):
+  lcm_least_inputs(a, b, c, ha, hb, Laws.gcd_divides(a, b))
 
 def pow2_mul(+a: Nat, +b: Nat) -> {Nat.mul(L.pow2(a), L.pow2(b)) == L.pow2(Nat.add(a, b)) : Nat}:
   match a:
