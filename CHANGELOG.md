@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `stats` 0.1.7.0: seed integer square root from the input bit length, run four Newton steps, and certify the corrected result against both universal bounds. Keep the proved search for a failed certificate. The fixed workload takes 10.034 ms, down from 17.759 ms; results and the API stay unchanged.
 - `stats` 0.1.6.0: prove gcd greatestness for every Nat common divisor and lcm minimality for every Nat common multiple, including zero inputs. Raise gcd fuel to 65 steps and prove the bound by halving the larger input after each pair of Euclid steps. Public results stay unchanged.
 - `runner` 0.15.0.0: import `hairpin` 0.14.1.0, `http` 0.38.6.0, `journal` 0.3.1.1, and `webhooks` 0.12.0.0. A job that hands `Hairpin.outcome` to runner gets `Retry.Rejected` for a 4xx. Breaking.
 - `lemmas` 0.1.3.0: prove Word shift and carry equations, multiplication modulo `2^n`, exact bounded U32 multiplication, and wrapped subtraction. Prove the U32 division-prefix invariant, quotient equation, remainder bound, and exact bridges to Nat division and remainder for every positive divisor.

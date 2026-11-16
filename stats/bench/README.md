@@ -141,3 +141,72 @@ All six implementations agree in every run:
 | isqrt | 1421540955 |
 
 Bend's gcd and lcm are within about 9% of C and Rust. Its isqrt is about 3.0 times slower than Rust's standard library, but faster than the C binary-search loop. [Issue #771](https://github.com/paymog/bend-kit/issues/771) tracks that measured isqrt gap. The checksums exposed no integer correctness failure.
+
+## Certified Newton integer square root
+
+Command: `python3 stats/bench/run.py`, from the repository root. Both rows use the same 2097207 pairs and three-run medians. The small probe passes first. The process monitor caps Bend at 8 GiB RSS.
+
+M4 Pro, macOS 25.6.0 arm64, 2026-11-15. Bend 2.0.38, Apple clang 21.0.0, rustc 1.91.0, Bun 1.4.4, Node 24.0.1, Python 3.14.6. Native build flags and input generation are unchanged. Times are in ms.
+
+| isqrt implementation | C | Rust | Bun | Node | Python | Bend |
+|---|---:|---:|---:|---:|---:|---:|
+| Before: 16-round search, stats 0.1.6.0 | 33.771 | 5.817 | 275.176 | 197.694 | 240.289 | 17.759 |
+| After: certified Newton, stats 0.1.7.0 | 28.734 | 4.951 | 242.535 | 176.091 | 226.483 | 10.034 |
+
+Other languages also became faster between batches. A separate native control therefore times the original search and the final certified implementation in the same process, over the same shared list. Its three runs give:
+
+| controlled pass | run 1 | run 2 | run 3 | median |
+|---|---:|---:|---:|---:|
+| Shared identity traversal | 9.649 | 8.743 | 9.540 | 9.540 |
+| Original shared isqrt | 17.835 | 16.992 | 17.212 | 17.212 |
+| Certified Newton shared isqrt | 10.968 | 11.357 | 11.052 | 11.052 |
+| Final identity traversal with list release | 26.948 | 27.204 | 27.038 | 27.038 |
+
+The controlled median improves by 35.8%. The final public call includes every certification check. The control generates its input before timing and uses `integer.sum` for each pass. The baseline calls `U32.isqrt.go(16n, a, 0, 65536)`; the new pass calls `U32.isqrt(a)`. Each pass prints its checksum. The list remains shared for both searches, then the final identity pass releases it. These are end-to-end traversal times, not isolated kernel times.
+
+The emitted C showed a round-count loop, candidate multiplication, and a separate selection helper. A first control measured identity traversal at 8.172 ms of the original 15.718 ms total. Six search variants and an arithmetic-selection variant did not give a reliable win: `Bool.pick` 18.105 ms, paired rounds 17.459 ms, fully expanded rounds 17.770 ms, arithmetic selection 22.867 ms, fused selection 15.906 ms, a constant first-round seed 17.093 ms, and a skipped leading round 19.161 ms. These exploratory batches were not interleaved. Their small differences cannot be ranked across batches. The paired-round control was slower than the original. None of those changes is retained.
+
+The retained seed is `1 << (1 + log2(n) / 2)`. Four integer Newton steps compute `(r + n / r) / 2`. One correction compares `r > n / r`, so a temporary value of 65536 cannot wrap a square. The certificate checks both square bounds with bounded products and treats 65535 separately. A failed certificate uses the existing proved search. The universal law proves the certificate and the search, not a convergence assumption about the seed.
+
+An independent Rust mirror of the exact U32 operations checked all 4294967296 inputs in 14.108 seconds with rustc 1.91.0 (`--edition=2021 -C opt-level=3`). Every candidate passed the certificate. The fallback count was zero. U64 squares also checked both bounds independently. The sum of all roots was `187647836979200`. This exhaustive check supplements, but does not replace, the universal Bend proof.
+
+To repeat that check, compile and run:
+
+```rust
+fn quo(n: u32, r: u32) -> u32 {
+    if r == 0 { 0 } else { n / r }
+}
+fn main() {
+    let mut sum = 0u64;
+    for wide in 0..=u32::MAX as u64 {
+        let n = wide as u32;
+        let log = if n == 0 { 0 } else { 31 - n.leading_zeros() };
+        let mut r = 1u32 << (1 + log / 2);
+        for _ in 0..4 { r = r.wrapping_add(quo(n, r)) / 2; }
+        if r > quo(n, r) { r = r.wrapping_sub(1); }
+        let next = r.wrapping_add(1);
+        assert!(r.wrapping_mul(r) <= n && (r == 65535 ||
+            (r < 65536 && next < 65536 && n < next.wrapping_mul(next))));
+        assert!((r as u64) * (r as u64) <= wide &&
+            wide < (r as u64 + 1) * (r as u64 + 1));
+        sum += r as u64;
+    }
+    assert_eq!(sum, 187647836979200);
+}
+```
+
+The final full harness gives:
+
+| op | C | Rust | Bun | Node | Python | Bend |
+|---|---:|---:|---:|---:|---:|---:|
+| mean | 0.005 | 0.005 | 0.536 | 0.464 | 0.025 | 0.250 |
+| variance | 0.012 | 0.014 | 0.537 | 0.637 | 0.263 | 0.804 |
+| median | 0.580 | 0.123 | 0.086 | 0.479 | 0.663 | 0.963 |
+| histogram | 0.100 | 0.044 | 0.932 | 0.877 | 1.117 | 0.288 |
+| gcd | 120.014 | 112.784 | 787.665 | 666.527 | 303.726 | 121.936 |
+| lcm | 114.032 | 114.695 | 780.080 | 484.984 | 495.221 | 119.868 |
+| isqrt | 28.734 | 4.951 | 242.535 | 176.091 | 226.483 | 10.034 |
+
+All six languages agree in every baseline and final run. The checksums remain mean `3422847917`, variance `1370401302`, median `1092607460`, histogram `1092535808`, gcd `18047959`, lcm `3181042401`, and isqrt `1421540955`.
+
+[Issue #773](https://github.com/paymog/bend-kit/issues/773) tracks separate kernel, traversal, and release measurements. [Issue #774](https://github.com/paymog/bend-kit/issues/774) tracks a direct Newton convergence proof to remove runtime certification. The temporary profiling and exhaustive-check programs are not part of the package.

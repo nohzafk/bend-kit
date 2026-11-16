@@ -3,7 +3,7 @@
 Descriptive statistics over `F64` lists: sum, mean, variance, standard deviation, quantiles, a histogram, and least-squares linear regression. Also `U32` gcd, lcm, and integer square root.
 
 ```bend
-import bend-kit-stats@0.1.6.0/stats.bend as S
+import bend-kit-stats@0.1.7.0/stats.bend as S
 ```
 
 It imports `bend-kit-f64@0.1.3.0`. Pass it values of that `F64` type.
@@ -13,7 +13,7 @@ It imports `bend-kit-f64@0.1.3.0`. Pass it values of that `F64` type.
 ```bend
 import Base
 import bend-kit-f64@0.1.3.0/f64.bend as F
-import bend-kit-stats@0.1.6.0/stats.bend as S
+import bend-kit-stats@0.1.7.0/stats.bend as S
 
 def n(k: U32) -> F.F64:
   F.F64.from_u32(k)
