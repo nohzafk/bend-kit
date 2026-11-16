@@ -315,7 +315,7 @@ def Stats.linear_regression(+xs: List<&2, F.F64>, +ys: List<&2, F.F64>) -> Maybe
   +n = List.length(&2, F.F64, xs)
   Stats.regress.if(Bool.and(Nat.is_eq(n, List.length(&2, F.F64, ys)), Nat.is_lt(1n, n)), xs, ys)
 
-# 48 steps suffice for U32; the exhaustion branch is unreachable from U32.gcd.
+# Two Euclid steps halve the larger input; 65 steps cover every U32.
 def U32.gcd.go(k: Nat, z: Bool, +a: U32, +b: U32) -> U32:
   match k z:
     case 0n _:
@@ -327,7 +327,7 @@ def U32.gcd.go(k: Nat, z: Bool, +a: U32, +b: U32) -> U32:
 
 def U32.gcd(+a: U32, +b: U32) -> U32:
   +lo = U32.min(a, b)
-  U32.gcd.go(48n, U32.is_zero(lo), U32.max(a, b), lo)
+  U32.gcd.go(65n, U32.is_zero(lo), U32.max(a, b), lo)
 
 def U32.lcm.if(ov: Bool, q: U32, b: U32) -> Maybe<&2, U32>:
   match ov:
