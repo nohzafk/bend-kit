@@ -51,6 +51,47 @@ fn time(op: &str, f: impl Fn() -> f64) {
     println!("{op}\t{ms:.3}\t{}", mix(r));
 }
 
+fn gcd(mut a: u32, mut b: u32) -> u32 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
+fn lcm(a: u32, b: u32) -> u32 {
+    if a == 0 || b == 0 {
+        return 0;
+    }
+    (a / gcd(a, b)).checked_mul(b).unwrap_or(0x9E3779B9)
+}
+
+fn integers() {
+    let mut pairs = vec![(0, 0), (0, u32::MAX), (u32::MAX, 0),
+        (u32::MAX, u32::MAX), (u32::MAX, 1), (65535, 65536),
+        (65536, 65537), (12, 18)];
+    let (mut a, mut b) = (0u32, 1u32);
+    for _ in 0..47 {
+        pairs.push((a, b));
+        (a, b) = (b, a.wrapping_add(b));
+    }
+    let n = std::env::args().nth(1).map(|s| s.parse().unwrap()).unwrap_or(2097152);
+    let mut x = 44;
+    for _ in 0..n {
+        a = xs(x);
+        x = xs(a);
+        pairs.push((a, x));
+    }
+    for (op, f) in [("gcd", gcd as fn(u32, u32) -> u32),
+                    ("lcm", lcm), ("isqrt", |a: u32, _| a.isqrt())] {
+        let t0 = Instant::now();
+        let mut checksum = 0u32;
+        for &(a, b) in &pairs {
+            checksum = checksum.wrapping_add(f(a, b));
+        }
+        println!("{op}\t{:.3}\t{checksum}", t0.elapsed().as_secs_f64() * 1e3);
+    }
+}
+
 fn main() {
     let mut x = 44u32;
     let v: Vec<f64> = (0..10000)
@@ -63,4 +104,5 @@ fn main() {
     time("variance", || variance(&v));
     time("median", || median(&v));
     time("histogram", || histogram(&v));
+    integers();
 }
