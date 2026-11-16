@@ -70,7 +70,70 @@ static double histogram(const double *v, int n) {
   return sum;
 }
 
-int main(void) {
+static uint32_t gcd(uint32_t a, uint32_t b) {
+  while (b) {
+    uint32_t r = a % b;
+    a = b;
+    b = r;
+  }
+  return a;
+}
+
+static uint32_t lcm(uint32_t a, uint32_t b) {
+  if (!a || !b) return 0;
+  uint64_t r = (uint64_t)(a / gcd(a, b)) * b;
+  return r > UINT32_MAX ? 0x9E3779B9 : (uint32_t)r;
+}
+
+static uint32_t isqrt(uint32_t a, uint32_t b) {
+  (void)b;
+  uint32_t lo = 0, hi = 65536;
+  while (lo + 1 < hi) {
+    uint32_t mid = lo + (hi - lo) / 2;
+    if (mid * mid <= a) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+static void integers(size_t n) {
+  uint32_t (*pairs)[2] = malloc((n + 55) * sizeof *pairs);
+  if (!pairs) exit(1);
+  const uint32_t edges[8][2] = {
+    {0, 0}, {0, UINT32_MAX}, {UINT32_MAX, 0}, {UINT32_MAX, UINT32_MAX},
+    {UINT32_MAX, 1}, {65535, 65536}, {65536, 65537}, {12, 18}
+  };
+  memcpy(pairs, edges, sizeof edges);
+  uint32_t a = 0, b = 1;
+  for (size_t i = 8; i < 55; i++) {
+    pairs[i][0] = a;
+    pairs[i][1] = b;
+    uint32_t next = a + b;
+    a = b;
+    b = next;
+  }
+  uint32_t x = 44;
+  for (size_t i = 55; i < n + 55; i++) {
+    a = xs(x);
+    x = xs(a);
+    pairs[i][0] = a;
+    pairs[i][1] = x;
+  }
+  const char *ops[] = {"gcd", "lcm", "isqrt"};
+  uint32_t (*funcs[])(uint32_t, uint32_t) = {gcd, lcm, isqrt};
+  for (int op = 0; op < 3; op++) {
+    struct timespec t0, t1;
+    uint32_t checksum = 0;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    for (size_t i = 0; i < n + 55; i++)
+      checksum += funcs[op](pairs[i][0], pairs[i][1]);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    printf("%s\t%.3f\t%u\n", ops[op], ms(t0, t1), checksum);
+  }
+  free(pairs);
+}
+
+int main(int argc, char **argv) {
   static double v[N];
   struct timespec t0, t1;
   uint32_t x = 44;
@@ -95,5 +158,6 @@ int main(void) {
   r = histogram(v, N);
   clock_gettime(CLOCK_MONOTONIC, &t1);
   printf("histogram\t%.3f\t%u\n", ms(t0, t1), mix(r));
+  integers(argc > 1 ? strtoul(argv[1], NULL, 10) : 2097152);
   return 0;
 }

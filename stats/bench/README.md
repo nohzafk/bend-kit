@@ -1,6 +1,6 @@
 # Statistics benchmark
 
-This times the mean, sample variance, median, and a 100-bin histogram of 10000 doubles. It compares `stats` with C, Rust, Python, and JavaScript.
+This times the mean, sample variance, median, and a 100-bin histogram of 10000 doubles. It also times U32 gcd, checked lcm, and integer square root. It compares `stats` with C, Rust, Python, and JavaScript.
 
 ## Run
 
@@ -9,7 +9,7 @@ python3 run.py      # 3 runs, median
 python3 run.py 5    # 5 runs
 ```
 
-You need `bend`, `cc`, `rustc`, `bun`, `node`, and `python3`. Binaries go to `out/`, which git ignores. It exits non-zero if a build fails, or if two programs disagree on a checksum.
+You need `bend`, `cc`, `rustc`, `bun`, `node`, and `python3`. Binaries go to `out/`, which git ignores. Each invocation builds each native program once. It checks a small integer input before the full input. It exits non-zero if a build fails, if checksums change between runs, or if two programs disagree on a checksum.
 
 ## The work
 
@@ -21,6 +21,9 @@ Each program makes 10000 xorshift32 draws from seed 44 and shifts each draw righ
 | variance | two-pass loop | two-pass `sum` | two-pass loop | two-pass loop | `Stats.variance` |
 | median | `qsort` | `sort_by(total_cmp)` | `statistics.median` | `Float64Array.sort` | `Stats.median` |
 | histogram | binary-search loop | `slice::partition_point` | `bisect.bisect_right` | binary-search loop | `Stats.histogram` |
+| gcd | Euclid loop | Euclid loop | `math.gcd` | Euclid loop | `U32.gcd` |
+| checked lcm | Euclid and U64 product | Euclid and `checked_mul` | `math.lcm` and U32 bound check | Euclid and division bound check | `U32.lcm` |
+| isqrt | integer binary search | `u32::isqrt` | `math.isqrt` | integer binary search | `U32.isqrt` |
 
 C and JavaScript have no statistics in the standard library, and Rust's has none either, so those use the obvious loop. Python's `statistics.variance` rounds the exact value once, and Python's `sum` compensates. Both give a variance that differs from the plain two-pass loop in the low bits, so the Python program sums with a plain loop for that op. The sum of the values is exact here, so `fmean` matches the loop.
 
@@ -94,3 +97,47 @@ Every language retains the four checksums above. Median is about 4.3 times faste
 ## Universal integer laws
 
 `python3 bench/run.py 1` on 2026-11-15 confirms all four checksums above in C, Rust, Bun, Node, Python, and Bend. This is one checksum run, not a new timing baseline. These float workloads do not call gcd, lcm, or integer square root; their universal proofs and existing fixtures cover the integer changes.
+
+## Integer workloads
+
+Each integer workload uses 2097207 pairs, generated before timing:
+
+- Eight edge pairs: `(0, 0)`, `(0, 0xFFFFFFFF)`, `(0xFFFFFFFF, 0)`, `(0xFFFFFFFF, 0xFFFFFFFF)`, `(0xFFFFFFFF, 1)`, `(65535, 65536)`, `(65536, 65537)`, and `(12, 18)`.
+- All 47 consecutive Fibonacci pairs that fit U32, from `(0, 1)` through `(1836311903, 2971215073)`.
+- 2097152 pairs from xorshift32, starting at seed 44. For each pair, `a = xs(x)` and `b = xs(a)`; the next seed is `b`. These draws keep all 32 bits.
+
+Gcd and lcm use both values. Isqrt uses the first value. The lcm cases include zero, equal maximum values, coprime values with a product that fits, and products that overflow. Each program sums the results modulo 2^32. A checked lcm result above `0xFFFFFFFF` is `None` and contributes `0x9E3779B9`, not zero. Python computes `math.lcm` first and checks that bound. JavaScript checks the bound before multiplication, so every retained product is exact.
+
+C and JavaScript have no standard-library integer gcd or isqrt. They use Euclid's loop and an integer binary-search loop. Rust has no standard-library gcd or lcm, so it uses Euclid's loop and `checked_mul`; its isqrt uses the standard library. No extra dependency is needed.
+
+The first probe uses the same 55 edge and Fibonacci pairs with only 16 random pairs. The harness checks its checksums across all six implementations. Each program accepts the random-pair count as its first argument. The full input is large enough for even Rust's isqrt to take several milliseconds. The float workloads are unchanged.
+
+### Results
+
+Command from the repository root: `python3 stats/bench/run.py` (three runs, median). The run used a process monitor that kills a Bend process above 8 GiB RSS. The small probe passed before the full input. No process reached that limit.
+
+M4 Pro, macOS 25.6.0 arm64, 2026-11-15. Bend 2.0.38 (native), Apple clang 21.0.0 (`-O2`), rustc 1.91.0 (`-C opt-level=3`), Bun 1.4.4, Node 24.0.1, Python 3.14.6. Times are in ms. Input generation is not timed. Traversal, calls, and checksum accumulation are timed. JavaScript includes JIT warm-up. Bend uses a shared list; the final traversal also releases that list.
+
+| op | C | Rust | Bun | Node | Python | Bend |
+|---|---:|---:|---:|---:|---:|---:|
+| mean | 0.006 | 0.005 | 0.626 | 0.510 | 0.028 | 0.258 |
+| variance | 0.011 | 0.011 | 0.615 | 0.754 | 0.271 | 0.894 |
+| median | 0.581 | 0.129 | 0.101 | 0.495 | 0.704 | 1.008 |
+| histogram | 0.099 | 0.035 | 1.058 | 0.950 | 1.202 | 0.268 |
+| gcd | 124.400 | 124.029 | 830.388 | 714.705 | 318.521 | 135.605 |
+| lcm | 124.711 | 123.512 | 828.964 | 519.887 | 515.763 | 133.552 |
+| isqrt | 32.043 | 5.599 | 264.228 | 191.325 | 234.334 | 16.898 |
+
+All six implementations agree in every run:
+
+| op | checksum |
+|---|---:|
+| mean | 3422847917 |
+| variance | 1370401302 |
+| median | 1092607460 |
+| histogram | 1092535808 |
+| gcd | 18047959 |
+| lcm | 3181042401 |
+| isqrt | 1421540955 |
+
+Bend's gcd and lcm are within about 9% of C and Rust. Its isqrt is about 3.0 times slower than Rust's standard library, but faster than the C binary-search loop. [Issue #771](https://github.com/paymog/bend-kit/issues/771) tracks that measured isqrt gap. The checksums exposed no integer correctness failure.

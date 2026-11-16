@@ -6,7 +6,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "out"
 RUNS = int(sys.argv[1]) if len(sys.argv) > 1 else 3
-OPS = ["mean", "variance", "median", "histogram"]
+OPS = ["mean", "variance", "median", "histogram", "gcd", "lcm", "isqrt"]
 ENV = {**os.environ, "BEND_NO_TELEMETRY": "1"}
 
 VARIANTS = {
@@ -39,6 +39,7 @@ def parse(text):
 def main():
     OUT.mkdir(exist_ok=True)
     table, checks = {}, {}
+    small_checks = None
     for name, (build, run) in VARIANTS.items():
         if build:
             r = subprocess.run(build, cwd=HERE, env=ENV, capture_output=True, text=True)
@@ -46,12 +47,26 @@ def main():
                 sys.exit(f"build failed: {name}\n{r.stderr}")
         runs = []
         for _ in range(RUNS):
+            # A small first run checks the edge cases before the timed input.
+            if not runs:
+                probe = subprocess.run([*run, "16"], cwd=HERE, env=ENV, capture_output=True, text=True)
+                if probe.returncode != 0:
+                    sys.exit(f"{name} small input failed:\n{probe.stdout}\n{probe.stderr}")
+                small = parse(probe.stdout)
+                current = {op: small[op][1] for op in OPS}
+                if small_checks is None:
+                    small_checks = current
+                elif current != small_checks:
+                    sys.exit(f"small input checksum mismatch: {name}: {current} != {small_checks}")
             r = subprocess.run(run, cwd=HERE, env=ENV, capture_output=True, text=True)
             if r.returncode != 0:
                 sys.exit(f"{name} failed:\n{r.stdout}\n{r.stderr}")
             runs.append(parse(r.stdout))
         table[name] = {op: statistics.median(x[op][0] for x in runs) for op in OPS}
         checks[name] = {op: runs[0][op][1] for op in OPS}
+        for result in runs:
+            if set(result) != set(OPS) or any(result[op][1] != checks[name][op] for op in OPS):
+                sys.exit(f"missing or unstable checksums: {name}")
         print(f"ran {name}", file=sys.stderr)
 
     for op in OPS:

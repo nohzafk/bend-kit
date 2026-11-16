@@ -60,3 +60,47 @@ for (const [op, f] of [["mean", mean], ["variance", variance], ["median", median
   const r = f(v);
   console.log(`${op}\t${(performance.now() - t0).toFixed(3)}\t${mix(r)}`);
 }
+
+function gcd(a: number, b: number): number {
+  while (b !== 0) [a, b] = [b, a % b];
+  return a;
+}
+
+function lcm(a: number, b: number): number {
+  if (a === 0 || b === 0) return 0;
+  const q = a / gcd(a, b);
+  return q > Math.floor(0xFFFFFFFF / b) ? 0x9E3779B9 : q * b;
+}
+
+function isqrt(a: number, _b: number): number {
+  let lo = 0, hi = 65536;
+  while (lo + 1 < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (mid * mid <= a) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+const pairs: [number, number][] = [
+  [0, 0], [0, 0xFFFFFFFF], [0xFFFFFFFF, 0], [0xFFFFFFFF, 0xFFFFFFFF],
+  [0xFFFFFFFF, 1], [65535, 65536], [65536, 65537], [12, 18],
+];
+let a = 0, b = 1;
+for (let i = 0; i < 47; i++) {
+  pairs.push([a, b]);
+  [a, b] = [b, a + b];
+}
+x = 44;
+const n = process.argv[2] === undefined ? 2097152 : Number(process.argv[2]);
+for (let i = 0; i < n; i++) {
+  a = xs(x);
+  x = xs(a);
+  pairs.push([a, x]);
+}
+for (const [op, f] of [["gcd", gcd], ["lcm", lcm], ["isqrt", isqrt]] as const) {
+  const t0 = performance.now();
+  let checksum = 0;
+  for (const [a, b] of pairs) checksum = (checksum + f(a, b)) >>> 0;
+  console.log(`${op}\t${(performance.now() - t0).toFixed(3)}\t${checksum}`);
+}
