@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import bisect, math, statistics, struct, sys, time
+import array, bisect, math, statistics, struct, sys, time
 
 def xs(x):
     x ^= (x << 13) & 0xFFFFFFFF
@@ -66,5 +66,16 @@ for op, f in [("gcd", math.gcd), ("lcm", checked_lcm),
     checksum = 0
     for a, b in pairs:
         checksum = (checksum + f(a, b)) & 0xFFFFFFFF
+    ms = (time.perf_counter() - t0) * 1e3
+    print(f"{op}\t{ms:.3f}\t{checksum}")
+
+packed = array.array("I", (word for pair in pairs for word in pair))
+assert packed.itemsize == 4
+for op, f in [("packed_identity", lambda a, b: a), ("packed_gcd", math.gcd),
+              ("packed_lcm", checked_lcm), ("packed_isqrt", lambda a, b: math.isqrt(a))]:
+    t0 = time.perf_counter()
+    checksum = 0
+    for i in range(0, len(packed), 2):
+        checksum = (checksum + f(packed[i], packed[i + 1])) & 0xFFFFFFFF
     ms = (time.perf_counter() - t0) * 1e3
     print(f"{op}\t{ms:.3f}\t{checksum}")

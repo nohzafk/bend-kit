@@ -7,6 +7,9 @@ HERE = Path(__file__).resolve().parent
 OUT = HERE / "out"
 RUNS = int(sys.argv[1]) if len(sys.argv) > 1 else 3
 OPS = ["mean", "variance", "median", "histogram", "gcd", "lcm", "isqrt"]
+PACKED = ["packed_identity", "packed_gcd", "packed_lcm", "packed_isqrt"]
+BEND_LIST = ["identity_shared", "gcd_shared", "lcm_shared", "isqrt_shared", "identity_release"]
+OPS += PACKED
 ENV = {**os.environ, "BEND_NO_TELEMETRY": "1"}
 
 VARIANTS = {
@@ -36,9 +39,22 @@ def parse(text):
     return got
 
 
+def check_rows(name, result):
+    expected = OPS + (BEND_LIST if name == "Bend" else [])
+    if set(result) != set(expected):
+        sys.exit(f"missing or extra rows: {name}: {set(result) ^ set(expected)}")
+    aliases = {f"packed_{op}": op for op in ["gcd", "lcm", "isqrt"]}
+    if name == "Bend":
+        aliases.update({f"{op}_shared": op for op in ["gcd", "lcm", "isqrt"]})
+        aliases.update(identity_shared="packed_identity", identity_release="packed_identity")
+    for op, reference in aliases.items():
+        if result[op][1] != result[reference][1]:
+            sys.exit(f"diagnostic checksum mismatch: {name}: {op} != {reference}")
+
+
 def main():
     OUT.mkdir(exist_ok=True)
-    table, checks = {}, {}
+    table, checks, estimates = {}, {}, {}
     small_checks = None
     for name, (build, run) in VARIANTS.items():
         if build:
@@ -53,6 +69,7 @@ def main():
                 if probe.returncode != 0:
                     sys.exit(f"{name} small input failed:\n{probe.stdout}\n{probe.stderr}")
                 small = parse(probe.stdout)
+                check_rows(name, small)
                 current = {op: small[op][1] for op in OPS}
                 if small_checks is None:
                     small_checks = current
@@ -62,11 +79,16 @@ def main():
             if r.returncode != 0:
                 sys.exit(f"{name} failed:\n{r.stdout}\n{r.stderr}")
             runs.append(parse(r.stdout))
-        table[name] = {op: statistics.median(x[op][0] for x in runs) for op in OPS}
-        checks[name] = {op: runs[0][op][1] for op in OPS}
+        measured = OPS + (BEND_LIST if name == "Bend" else [])
         for result in runs:
-            if set(result) != set(OPS) or any(result[op][1] != checks[name][op] for op in OPS):
-                sys.exit(f"missing or unstable checksums: {name}")
+            check_rows(name, result)
+        table[name] = {op: statistics.median(x[op][0] for x in runs) for op in measured}
+        checks[name] = {op: runs[0][op][1] for op in measured}
+        estimates[name] = {op: statistics.median(x[f"packed_{op}"][0] - x["packed_identity"][0] for x in runs)
+                           for op in ["gcd", "lcm", "isqrt"]}
+        for result in runs:
+            if any(result[op][1] != checks[name][op] for op in measured):
+                sys.exit(f"unstable checksums: {name}")
         print(f"ran {name}", file=sys.stderr)
 
     for op in OPS:
@@ -84,6 +106,16 @@ def main():
     print("|---|---:|")
     for op in OPS:
         print(f"| {op} | {checks['Bend'][op]} |")
+    print("\nBend list ownership (ms; each kernel pass retains the same shared list):")
+    print("| op | Bend | checksum |")
+    print("|---|---:|---:|")
+    for op in BEND_LIST:
+        print(f"| {op} | {table['Bend'][op]:,.3f} | {checks['Bend'][op]} |")
+    print("\nKernel estimates (ms; median of each run's packed kernel minus packed identity, not direct timings):")
+    print("| op | " + " | ".join(names) + " |")
+    print("|---|" + "---:|" * len(names))
+    for op in ["gcd", "lcm", "isqrt"]:
+        print(f"| {op} | " + " | ".join(f"{estimates[n][op]:,.3f}" for n in names) + " |")
 
 
 main()

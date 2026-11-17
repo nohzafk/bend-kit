@@ -104,3 +104,22 @@ for (const [op, f] of [["gcd", gcd], ["lcm", lcm], ["isqrt", isqrt]] as const) {
   for (const [a, b] of pairs) checksum = (checksum + f(a, b)) >>> 0;
   console.log(`${op}\t${(performance.now() - t0).toFixed(3)}\t${checksum}`);
 }
+
+const packed = new Uint32Array(pairs.length * 2);
+for (let i = 0; i < pairs.length; i++) {
+  packed[2 * i] = pairs[i][0];
+  packed[2 * i + 1] = pairs[i][1];
+}
+for (const [op, f] of [
+  ["packed_identity", (a: number, _b: number) => a],
+  ["packed_gcd", gcd],
+  ["packed_lcm", lcm],
+  ["packed_isqrt", isqrt],
+] as const) {
+  const t0 = performance.now();
+  let checksum = 0;
+  for (let i = 0; i < packed.length; i += 2) {
+    checksum = (checksum + f(packed[i], packed[i + 1])) >>> 0;
+  }
+  console.log(`${op}\t${(performance.now() - t0).toFixed(3)}\t${checksum}`);
+}
