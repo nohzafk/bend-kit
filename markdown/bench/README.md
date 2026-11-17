@@ -35,6 +35,26 @@ M4 Pro, macOS 26.7.2, 2026-11-15. Bend 2.0.38, Apple clang 17.0.0, rustc 1.91.0,
 
 Bend took 311.8 ms on 2026-11-13. `Bool.pick` evaluates both of its branches, so the block parser built every candidate block for each line, and the HTML escape built four escaped tails for each code point. `markdown` 0.3.1.0 takes those branches through `when`, which evaluates only the chosen one. Block parsing fell from 171 ms to 85 ms, and escaping the whole document from 81 ms to 7 ms.
 
+## Paragraph scaling
+
+`scale.bend` times one `to_html` call on one paragraph of N copies of a line. The line has emphasis, strong emphasis, a code span, and an entity reference. The `links` input also has an inline link with a title on each line. Doubling N should about double the time.
+
+```sh
+bend scale.bend -o out/scale && ./out/scale
+```
+
+M4 Pro, 2026-11-17, Bend 2.0.38, one run. Times are in ms. `before` is `markdown` 0.3.1.0; `after` is 0.3.2.0.
+
+| lines | links before | links after | plain before | plain after |
+|---:|---:|---:|---:|---:|
+| 100 | 15.3 | 3.4 | 4.9 | 2.4 |
+| 200 | 55.7 | 6.2 | 17.0 | 5.5 |
+| 400 | 234.2 | 13.1 | 61.2 | 11.0 |
+| 800 | 979.1 | 27.0 | 235.8 | 23.0 |
+| 1600 | 4023.8 | 62.9 | 923.1 | 46.6 |
+
+Three passes grew with the square of the paragraph length. `find` matched each emphasis closer through `Bool.pick`, so it walked the whole stack below the opener too. Each link deactivated the brackets in every inline before it. Each link also computed its reference label from the lengths of two tails of the paragraph, even when the inline link matched. `find` now takes the chosen branch through `when`. A link leaves an `IMark`, and `deact` stops at it. The reference label waits for the inline link to fail.
+
 ## Caveats
 
 - Bend reads and writes `String`, a list with one cell per code point. The others read flat buffers.
