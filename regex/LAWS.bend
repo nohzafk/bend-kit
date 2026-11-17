@@ -506,4 +506,103 @@ law bad_count_order:
   {ok("a{3,2}") == False{} : Bool}
 
 law bad_flags:
-  {ok("(?i)a") == False{} : Bool}
+  {ok("(?s)a") == False{} : Bool}
+
+# A leading (?i) is the only flag. Go accepts the rest; this package refuses them.
+law flag_leading:
+  {ok("(?i)a") == True{} : Bool}
+
+law bad_flag_inside:
+  {ok("a(?i)b") == False{} : Bool}
+
+law bad_flag_group:
+  {ok("(?i:a)") == False{} : Bool}
+
+law bad_flag_twice:
+  {ok("(?i)(?i)a") == False{} : Bool}
+
+# (?i): Unicode simple case folding, as in RE2. The expected spans are what Go's regexp answers.
+# U+212A (Kelvin sign) folds with k, U+017F (long s) with s; \w and [a-z] take them in, \W leaves them out.
+law fold_literal:
+  {m("(?i)hello", "say HeLLo") == Some{[sp(4, 9)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_off_by_default:
+  {m("hello", "say HeLLo") == None{} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_empty:
+  {m("(?i)", "abc") == Some{[sp(0, 0)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_class_range:
+  {m("(?i)[a-c]+", "xxABcz") == Some{[sp(2, 5)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_class_range_non_ascii:
+  {m("(?i)[a-z]+", "\u{17f}\u{212a}!") == Some{[sp(0, 2)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_negated_class:
+  {m("(?i)[^a]+", "aAAbB") == Some{[sp(3, 5)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_negated_class_non_ascii:
+  {m("(?i)[^k]", "\u{212a}x") == Some{[sp(1, 2)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_word:
+  {m("(?i)\\w", "\u{212a}") == Some{[sp(0, 1)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law word_no_fold:
+  {m("\\w", "\u{212a}") == None{} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_not_word:
+  {m("(?i)\\W", "\u{212a}x!") == Some{[sp(2, 3)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_not_word_in_class:
+  {m("(?i)[\\W]", "\u{212a}x!") == Some{[sp(2, 3)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_digit:
+  {m("(?i)\\d+", "a12") == Some{[sp(1, 3)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_upper:
+  {m("(?i)\\p{Lu}+", "abC1") == Some{[sp(0, 3)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_not_upper:
+  {m("(?i)\\P{Lu}", "aB1") == Some{[sp(2, 3)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_kelvin:
+  {m("(?i)k", "\u{212a}") == Some{[sp(0, 1)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_long_s:
+  {m("(?i)S", "\u{17f}") == Some{[sp(0, 1)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_sigma:
+  {m("(?i)\u{3c3}+", "\u{3a3}\u{3c2}") == Some{[sp(0, 2)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_accent:
+  {m("(?i)\u{e9}", "x\u{c9}") == Some{[sp(1, 2)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_simple_only:
+  {m("(?i)ss", "\u{df}") == None{} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_sharp_s:
+  {m("(?i)\u{df}", "\u{1e9e}") == Some{[sp(0, 1)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_captures:
+  {m("(?i)(a+)(B+)", "xAabBy") == Some{[sp(1, 5), sp(1, 3), sp(3, 5)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_word_boundary:
+  {m("(?i)\\bK\\b", "ak k b") == Some{[sp(3, 4)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_bytes_kelvin:
+  {mb("(?i)k", "\u{e2}\u{84}\u{aa}") == Some{[sp(0, 3)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_bytes_literal:
+  {mb("(?i)fold_unit", "xx FOLD_UNIT yy") == Some{[sp(3, 12)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_bytes_not_word:
+  {mb("(?i)\\W+", "\u{e2}\u{84}\u{aa}\u{c5}\u{bf}-") == Some{[sp(5, 6)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law fold_bits:
+  {both(R.compile("(?i)abc"), "xABC") == yes() : Maybe<&2, Bool> & Bool}
+
+law fold_bits_not_word:
+  {both(R.compile("(?i)\\W"), "\u{212a}") == no() : Maybe<&2, Bool> & Bool}
+
+law fold_bits_bytes:
+  {bboth(R.compile("(?i)[k]"), "\u{e2}\u{84}\u{aa}") == yes() : Maybe<&2, Bool> & Bool}

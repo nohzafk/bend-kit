@@ -2,6 +2,7 @@
 import Base
 import bend-kit-unicode@0.1.0.0/unicode.bend as U
 import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
+import ./fold.bend as F
 
 # Positions count code points of the String, not octets.
 # Leftmost-first semantics, as RE2 and Perl: the first alternative that matches wins.
@@ -10,9 +11,12 @@ import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 # ------
 
 # A set member: a code point range, or a Unicode general category ("L", "Lu", ...).
+# Fold, under (?i): the code points whose simple case folding class meets items
+# (complemented when neg). Its items are Rng and Prop only.
 type Item is Data:
   Rng{lo: U32, hi: U32}
   Prop{neg: Bool, name: String}
+  Fold{neg: Bool, items: List<&2, Item>}
 
 # Assertion kinds: 0 start of text, 1 end of text, 2 word boundary, 3 not a word boundary.
 type Node is Data:
@@ -34,6 +38,58 @@ type Tok is Data:
 
 def lit(+c: U32) -> Node:
   NSet{False{}, [Rng{c, c}]}
+
+# Case folding (?i)
+# -----------------
+
+def fold.points(xs: List<&2, U32>, acc: List<&2, Item>) -> List<&2, Item>:
+  match xs:
+    case Nil{}:
+      acc
+    case Con{+x, t}:
+      fold.points(t, Rng{x, x} <> acc)
+
+# c and the code points equivalent to it, as one-point ranges.
+def fold.point(+c: U32) -> List<&2, Item>:
+  Rng{c, c} <> fold.points(F.others(c), Nil{})
+
+def lit.f(fold: Bool, +c: U32) -> Node:
+  match fold:
+    case True{}:
+      NSet{False{}, fold.point(c)}
+    case False{}:
+      lit(c)
+
+def fold.rng(one: Bool, +lo: U32, +hi: U32) -> List<&2, Item>:
+  match one:
+    case True{}:
+      fold.point(lo)
+    case False{}:
+      [Fold{False{}, [Rng{lo, hi}]}]
+
+# A class member under (?i). Escapes come back from esc already folded.
+def fold.item(i: Item) -> List<&2, Item>:
+  match i:
+    case Rng{+lo, +hi}:
+      fold.rng(U32.is_eq(lo, hi), lo, hi)
+    case Prop{neg, name}:
+      [Fold{neg, [Prop{False{}, name}]}]
+    case Fold{neg, xs}:
+      [Fold{neg, xs}]
+
+def fold.items(xs: List<&2, Item>) -> List<&2, Item>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case Con{h, t}:
+      List.append(&2, Item, fold.item(h), fold.items(t))
+
+def fold.class(fold: Bool, items: List<&2, Item>) -> List<&2, Item>:
+  match fold:
+    case True{}:
+      fold.items(items)
+    case False{}:
+      items
 
 def is_digit(+c: U32) -> Bool:
   U32.is_le(48, c) && U32.is_le(c, 57)
@@ -106,6 +162,37 @@ def prop(neg: Bool, s: String) -> Esc:
     case SCon{c, t}:
       prop.ok(neg, SCon{c, SNil{}}, t)
 
+# Under (?i), \p{X} is every code point equivalent to one in X, and \P{X} the rest.
+def prop.fold(fold: Bool, e: Esc) -> Esc:
+  match fold:
+    case False{}:
+      e
+    case True{}:
+      match e:
+        case EItems{xs, t}:
+          EItems{fold.items(xs), t}
+        case EPoint{c, t}:
+          EPoint{c, t}
+        case EAssert{k, t}:
+          EAssert{k, t}
+        case EBad{}:
+          EBad{}
+
+# \w under (?i) adds the Kelvin sign and long s; \W loses them. \d and \s have no case.
+def perl.w.f(fold: Bool) -> List<&2, Item>:
+  match fold:
+    case True{}:
+      [Fold{False{}, perl.w()}]
+    case False{}:
+      perl.w()
+
+def perl.W.f(fold: Bool) -> List<&2, Item>:
+  match fold:
+    case True{}:
+      [Fold{True{}, perl.w()}]
+    case False{}:
+      perl.W()
+
 # An escaped letter or digit with no meaning is an error, as in RE2.
 def esc.other(alnum: Bool, +c: U32, t: String) -> Esc:
   match alnum:
@@ -114,8 +201,8 @@ def esc.other(alnum: Bool, +c: U32, t: String) -> Esc:
     case False{}:
       EPoint{c, t}
 
-# The text after a backslash.
-def esc(s: String) -> Esc:
+# The text after a backslash; fold under (?i).
+def esc(+fold: Bool, s: String) -> Esc:
   match s:
     case SNil{}:
       EBad{}
@@ -124,17 +211,17 @@ def esc(s: String) -> Esc:
     case SCon{'D', t}:
       EItems{perl.D(), t}
     case SCon{'w', t}:
-      EItems{perl.w(), t}
+      EItems{perl.w.f(fold), t}
     case SCon{'W', t}:
-      EItems{perl.W(), t}
+      EItems{perl.W.f(fold), t}
     case SCon{'s', t}:
       EItems{perl.s(), t}
     case SCon{'S', t}:
       EItems{perl.S(), t}
     case SCon{'p', t}:
-      prop(False{}, t)
+      prop.fold(fold, prop(False{}, t))
     case SCon{'P', t}:
-      prop(True{}, t)
+      prop.fold(fold, prop(True{}, t))
     case SCon{'A', t}:
       EAssert{0, t}
     case SCon{'z', t}:
@@ -188,7 +275,7 @@ def class.lo(+c: U32, t: String, items: List<&2, Item>) -> Cs:
     case SCon{'-', SCon{']', u}}:
       CsDone{Rng{45, 45} <> Rng{c, c} <> items, u}
     case SCon{'-', SCon{'\\', u}}:
-      class.hi(esc(u), c, items)
+      class.hi(esc(False{}, u), c, items)
     case SCon{'-', SCon{Chr{+d}, u}}:
       class.range(U32.is_le(c, d), c, d, u, items)
     case _:
@@ -206,7 +293,7 @@ def class.esc(e: Esc, items: List<&2, Item>) -> Cs:
       CsFail{}
 
 # A "]" right after "[" or "[^" is a member.
-def class.step(s: String, first: Bool, items: List<&2, Item>) -> Cs:
+def class.step(+fold: Bool, s: String, first: Bool, items: List<&2, Item>) -> Cs:
   match s:
     case SNil{}:
       CsFail{}
@@ -217,26 +304,26 @@ def class.step(s: String, first: Bool, items: List<&2, Item>) -> Cs:
         case False{}:
           CsDone{items, t}
     case SCon{'\\', t}:
-      class.esc(esc(t), items)
+      class.esc(esc(fold, t), items)
     case SCon{Chr{+c}, t}:
       class.lo(c, t, items)
 
 # fuel: every step eats at least one char.
-def class.run(fuel: Nat, st: Cs) -> Cs:
+def class.run(fuel: Nat, +fold: Bool, st: Cs) -> Cs:
   match fuel:
     case 0n:
       CsFail{}
     case 1n+f:
       match st:
         case CsGo{s, first, items}:
-          class.run(f, class.step(s, first, items))
+          class.run(f, fold, class.step(fold, s, first, items))
         case CsDone{items, rest}:
           CsDone{items, rest}
         case CsFail{}:
           CsFail{}
 
-def class(+s: String, first: Bool) -> Cs:
-  class.run(Nat.add(String.length(s), 1n), CsGo{s, first, Nil{}})
+def class(+fold: Bool, +s: String, first: Bool) -> Cs:
+  class.run(Nat.add(String.length(s), 1n), fold, CsGo{s, first, Nil{}})
 
 # Lexer
 # -----
@@ -317,19 +404,19 @@ def lex.brace.min(none: Bool, m: Num, +orig: String, toks: List<&2, Tok>) -> Lx:
         case _:
           LGo{orig, TAtom{lit(123)} <> toks}
 
-def lex.class(neg: Bool, r: Cs, toks: List<&2, Tok>) -> Lx:
+def lex.class(fold: Bool, neg: Bool, r: Cs, toks: List<&2, Tok>) -> Lx:
   match r:
     case CsDone{items, rest}:
-      LGo{rest, TAtom{NSet{neg, items}} <> toks}
+      LGo{rest, TAtom{NSet{neg, fold.class(fold, items)}} <> toks}
     case CsGo{s, first, items}:
       LFail{}
     case CsFail{}:
       LFail{}
 
-def lex.esc(e: Esc, toks: List<&2, Tok>) -> Lx:
+def lex.esc(fold: Bool, e: Esc, toks: List<&2, Tok>) -> Lx:
   match e:
     case EPoint{c, t}:
-      LGo{t, TAtom{lit(c)} <> toks}
+      LGo{t, TAtom{lit.f(fold, c)} <> toks}
     case EItems{xs, t}:
       LGo{t, TAtom{NSet{False{}, xs}} <> toks}
     case EAssert{k, t}:
@@ -337,16 +424,16 @@ def lex.esc(e: Esc, toks: List<&2, Tok>) -> Lx:
     case EBad{}:
       LFail{}
 
-def lex.step(s: String, toks: List<&2, Tok>) -> Lx:
+def lex.step(+fold: Bool, s: String, toks: List<&2, Tok>) -> Lx:
   match s:
     case SNil{}:
       LDone{toks}
     case SCon{'\\', t}:
-      lex.esc(esc(t), toks)
+      lex.esc(fold, esc(fold, t), toks)
     case SCon{'[', SCon{'^', t}}:
-      lex.class(True{}, class(t, True{}), toks)
+      lex.class(fold, True{}, class(fold, t, True{}), toks)
     case SCon{'[', t}:
-      lex.class(False{}, class(t, True{}), toks)
+      lex.class(fold, False{}, class(fold, t, True{}), toks)
     case SCon{'(', SCon{'?', SCon{':', t}}}:
       LGo{t, TOpen{False{}} <> toks}
     case SCon{'(', SCon{'?', t}}:
@@ -373,17 +460,17 @@ def lex.step(s: String, toks: List<&2, Tok>) -> Lx:
     case SCon{'$', t}:
       LGo{t, TAtom{NAssert{1}} <> toks}
     case SCon{Chr{+c}, t}:
-      LGo{t, TAtom{lit(c)} <> toks}
+      LGo{t, TAtom{lit.f(fold, c)} <> toks}
 
 # fuel: every step but the last eats at least one char.
-def lex(fuel: Nat, st: Lx) -> Maybe<&2, List<&2, Tok>>:
+def lex(fuel: Nat, +fold: Bool, st: Lx) -> Maybe<&2, List<&2, Tok>>:
   match fuel:
     case 0n:
       None{}
     case 1n+f:
       match st:
         case LGo{s, toks}:
-          lex(f, lex.step(s, toks))
+          lex(f, fold, lex.step(fold, s, toks))
         case LDone{toks}:
           Some{List.reverse(&2, Tok, toks)}
         case LFail{}:
@@ -883,12 +970,46 @@ def bits.if(ok: Bool, +fuel: Nat, +prog: List<&2, Inst>) -> Maybe<&2, Bits>:
 def bits(+fuel: Nat, +prog: List<&2, Inst>) -> Maybe<&2, Bits>:
   bits.if(Nat.is_le(List.length(&2, Inst, prog), 32n) && bits.plain(prog), fuel, prog)
 
+# A Rng or Prop; a Fold never nests.
+def item.plain(i: Item, +c: U32) -> Bool:
+  match i:
+    case Rng{+lo, +hi}:
+      U32.is_le(lo, c) && U32.is_le(c, hi)
+    case Prop{neg, name}:
+      Bool.xor(neg, String.starts_with(U.category(Chr{c}), name))
+    case Fold{neg, xs}:
+      False{}
+
+def items.plain(xs: List<&2, Item>, +c: U32) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case Con{h, t}:
+      item.plain(h, c) || items.plain(t, c)
+
+def fold.any(os: List<&2, U32>, +xs: List<&2, Item>) -> Bool:
+  match os:
+    case Nil{}:
+      False{}
+    case Con{+o, t}:
+      items.plain(xs, o) || fold.any(t, xs)
+
+# The case table is read only when c itself misses.
+def fold.has(hit: Bool, +c: U32, +xs: List<&2, Item>) -> Bool:
+  match hit:
+    case True{}:
+      True{}
+    case False{}:
+      fold.any(F.others(c), xs)
+
 def item.has(i: Item, +c: U32) -> Bool:
   match i:
     case Rng{+lo, +hi}:
       U32.is_le(lo, c) && U32.is_le(c, hi)
     case Prop{neg, name}:
       Bool.xor(neg, String.starts_with(U.category(Chr{c}), name))
+    case Fold{neg, +xs}:
+      Bool.xor(neg, fold.has(items.plain(xs, c), c, xs))
 
 def items.has(xs: List<&2, Item>, +c: U32) -> Bool:
   match xs:
@@ -982,9 +1103,17 @@ def compile.parse(toks: Maybe<&2, List<&2, Tok>>) -> Maybe<&2, Regex>:
     case Some{ts}:
       compile.fin(parse(ts, Ps{1, False{}, Nil{}, Nil{}, Nil{}}))
 
-# The pattern, or None for a syntax error.
+def compile.go(+fold: Bool, +pat: String) -> Maybe<&2, Regex>:
+  compile.parse(lex(Nat.add(String.length(pat), 2n), fold, LGo{pat, Nil{}}))
+
+# The pattern, or None for a syntax error. A leading (?i) folds case over the
+# whole pattern, by Unicode simple case folding as in RE2; no other flag is known.
 def compile(+pat: String) -> Maybe<&2, Regex>:
-  compile.parse(lex(Nat.add(String.length(pat), 2n), LGo{pat, Nil{}}))
+  match pat:
+    case SCon{'(', SCon{'?', SCon{'i', SCon{')', t}}}}:
+      compile.go(True{}, t)
+    case _:
+      compile.go(False{}, pat)
 
 # Matcher
 # -------

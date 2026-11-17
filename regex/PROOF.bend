@@ -409,3 +409,99 @@ def Laws.bad_count_order():
 
 def Laws.bad_flags():
   {==}
+
+def Laws.flag_leading():
+  {==}
+
+def Laws.bad_flag_inside():
+  {==}
+
+def Laws.bad_flag_group():
+  {==}
+
+def Laws.bad_flag_twice():
+  {==}
+
+def Laws.fold_literal():
+  {==}
+
+def Laws.fold_off_by_default():
+  {==}
+
+def Laws.fold_empty():
+  {==}
+
+def Laws.fold_class_range():
+  {==}
+
+def Laws.fold_class_range_non_ascii():
+  {==}
+
+def Laws.fold_negated_class():
+  {==}
+
+def Laws.fold_negated_class_non_ascii():
+  {==}
+
+def Laws.fold_word():
+  {==}
+
+def Laws.word_no_fold():
+  {==}
+
+def Laws.fold_not_word():
+  {==}
+
+def Laws.fold_not_word_in_class():
+  {==}
+
+def Laws.fold_digit():
+  {==}
+
+def Laws.fold_upper():
+  {==}
+
+def Laws.fold_not_upper():
+  {==}
+
+def Laws.fold_kelvin():
+  {==}
+
+def Laws.fold_long_s():
+  {==}
+
+def Laws.fold_sigma():
+  {==}
+
+def Laws.fold_accent():
+  {==}
+
+def Laws.fold_simple_only():
+  {==}
+
+def Laws.fold_sharp_s():
+  {==}
+
+def Laws.fold_captures():
+  {==}
+
+def Laws.fold_word_boundary():
+  {==}
+
+def Laws.fold_bytes_kelvin():
+  {==}
+
+def Laws.fold_bytes_literal():
+  {==}
+
+def Laws.fold_bytes_not_word():
+  {==}
+
+def Laws.fold_bits():
+  {==}
+
+def Laws.fold_bits_not_word():
+  {==}
+
+def Laws.fold_bits_bytes():
+  {==}

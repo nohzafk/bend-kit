@@ -32,8 +32,15 @@ With a `String`, positions count its code points, not octets. With `Bytes`, the 
 | Repetition | `* + ? {n} {n,} {n,m}`, lazy with a trailing `?`; counts go up to 1000 |
 | Groups | `(a)` captures, `(?:a)` does not |
 | Anchors | `^ \A` start of text, `$ \z` end of text, `\b \B` word boundary |
+| Case folding | a leading `(?i)`, for the whole pattern |
 
-These are syntax errors, not silent mismatches: flags such as `(?i)`, named groups, `\x` hex escapes, POSIX classes such as `[:alpha:]`, backreferences, and a repetition of a repetition (`a**`). The `LAWS.bend` fixtures, and 600 random patterns, give the same spans as Go's `regexp`, which implements RE2.
+These are syntax errors, not silent mismatches: any flag but a leading `(?i)` (so `a(?i)b`, `(?i:a)` and `(?s)`), named groups, `\x` hex escapes, POSIX classes such as `[:alpha:]`, backreferences, and a repetition of a repetition (`a**`). The `LAWS.bend` fixtures, and 600 random patterns, give the same spans as Go's `regexp`, which implements RE2.
+
+## Case folding
+
+`(?i)` uses Unicode's simple case folding, as RE2 does: two code points match each other when `CaseFolding.txt` (statuses C and S) folds them to the same code point. So `(?i)k` matches `k`, `K` and the Kelvin sign U+212A, and `(?i)σ` matches `σ`, `ς` and `Σ`. There is no full folding: `(?i)ss` does not match `ß`. A class takes in every code point equivalent to one of its members, before `[^...]` negates it: `(?i)\w` and `(?i)[a-z]` match U+017F and U+212A, and `(?i)\W` and `(?i)\P{Lu}` match neither the folded nor the original members. `\d`, `\s`, `.` and `\b` are unchanged.
+
+`fold.bend` holds the classes, generated from UCD 17.0 by `python3 regex/fold.py`. They equal Go's `unicode.SimpleFold` for every code point. A folded class reads the table only for a char that misses the class itself; a folded literal is a set of its equivalents, built when the pattern compiles.
 
 ## Cost
 
