@@ -644,3 +644,79 @@ law lead_fold_boundary:
 
 law lead_fold_boundary_bytes:
   {mb("(?i)\\bk", "xk \u{e2}\u{84}\u{aa}") == None{} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+# The capture-free DFA: its cache filling, the idle point it hands to the Pike VM, wide chars,
+# and is_match by the DFA alone. Spans from Go's regexp.
+
+# A text under 4096 chars caches 8 states; this pattern needs more, so the Pike VM takes over from the idle point.
+law dfa_full:
+  {m("[ab]*a[ab]{3}x", String.repeat("abba", 40n) ++ "aabbx" ++ String.repeat("ab", 10n)) == Some{[sp(0, 165)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law dfa_full_bytes:
+  {mb("[ab]*a[ab]{3}x", String.repeat("abba", 40n) ++ "aabbx" ++ String.repeat("ab", 10n)) == Some{[sp(0, 165)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law dfa_full_none:
+  {m("[ab]*a[ab]{3}x", String.repeat("ab", 50n)) == None{} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law dfa_full_none_bytes:
+  {mb("[ab]*a[ab]{3}x", String.repeat("ab", 50n)) == None{} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+# The Pike VM starts at an idle point and must see the char before it.
+law dfa_idle_prev:
+  {m("\\bab", "xab ab") == Some{[sp(4, 6)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law dfa_idle_prev_bytes:
+  {mb("\\bab", "xab ab") == Some{[sp(4, 6)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+# Steps on wide chars are not cached.
+law dfa_wide:
+  {m("[^a]+b", "a\u{4e2d}\u{6587}b") == Some{[sp(1, 4)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law dfa_wide_bytes:
+  {mb("[^a]+b", "a\u{e4}\u{b8}\u{ad}\u{e6}\u{96}\u{87}b") == Some{[sp(1, 8)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law dfa_wide_lit:
+  {m("\u{e9}+x", "a\u{e9}\u{e9}x") == Some{[sp(1, 4)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law dfa_wide_lit_bytes:
+  {mb("\u{e9}+x", "a\u{c3}\u{a9}\u{c3}\u{a9}x") == Some{[sp(1, 6)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+# Captures come from the Pike VM after the DFA finds a match.
+law dfa_groups:
+  {m("(a+)(b+)", "xxaab") == Some{[sp(2, 5), sp(2, 4), sp(4, 5)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law dfa_groups_bytes:
+  {mb("(a+)(b+)", "xxaab") == Some{[sp(2, 5), sp(2, 4), sp(4, 5)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+# A match seen only at the end of the text.
+law dfa_end:
+  {m("a$", "ba") == Some{[sp(1, 2)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law dfa_end_bytes:
+  {mb("a$", "ba") == Some{[sp(1, 2)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law dfa_empty_text:
+  {m("x*", "") == Some{[sp(0, 0)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law dfa_empty_text_bytes:
+  {mb("x*", "") == Some{[sp(0, 0)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+# A wide char outside lead is skipped by its sets, not by the ASCII table.
+law dfa_fold_wide:
+  {m("(?i)\\w+@\\w+", "\u{4e2d} a@b") == Some{[sp(2, 5)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law dfa_fold_wide_bytes:
+  {mb("(?i)\\w+@\\w+", "\u{e4}\u{b8}\u{ad} a@b") == Some{[sp(4, 7)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+# is_match through the DFA alone, where the bit NFA does not apply.
+law dfa_hit_boundary:
+  {both(R.compile("\\bk\\b"), "xk k") == (None{}, True{}) : Maybe<&2, Bool> & Bool}
+
+law dfa_hit_boundary_bytes:
+  {bboth(R.compile("\\bk\\b"), "xk k") == (None{}, True{}) : Maybe<&2, Bool> & Bool}
+
+law dfa_miss_boundary:
+  {both(R.compile("(?i)\\bK"), "xk") == (None{}, False{}) : Maybe<&2, Bool> & Bool}
+
+law dfa_miss_boundary_bytes:
+  {bboth(R.compile("(?i)\\bK"), "xk") == (None{}, False{}) : Maybe<&2, Bool> & Bool}

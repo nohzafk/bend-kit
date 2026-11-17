@@ -1400,6 +1400,431 @@ def run(fuel: Nat, s: String, +prog: Trie<Inst>, +cfuel: Nat, +init: List<&2, Ma
               +p = (pos + 1 : U32)
               run(f, t, prog, cfuel, init, start, lead, asc, any, p, run.step(Vm{ths, best}, prog, cfuel, init, start, any, p, c, String.get(t, 0n)))
 
+# States
+# ------
+
+# The seed thread's index, and the id of a state the full cache could not add.
+def seed.id() -> U32:
+  4294967295
+
+# A new thread: pc, the thread at src it came from (or the seed), and the slots it saved.
+type Op is Data:
+  Op{src: U32, pc: U32, saves: List<&2, U32>}
+
+# next: the state after the char; hit: 1 + the index of the thread that matched, or 0;
+# fresh: no match yet and every new thread comes from the seed, so the next state is a fresh start.
+type Tr is Data:
+  TrNo{}
+  TrSame{}
+  Tr{next: U32, hit: U32, outs: List<&2, Op>, fresh: Bool}
+
+type Sk is Data:
+  Sk{pcs: List<&2, U32>, done: Bool}
+
+type Ix is Data:
+  Ix{key: Sk, id: U32}
+
+# The interned states, how many there are, and the id of one.
+type Ik is Data:
+  Ik{keys: Trie<List<&2, Ix>>, n: U32, id: U32}
+
+# A learned transition, with the next state's key in place of its id.
+type Lr is Data:
+  Lr{hit: U32, outs: List<&2, Op>, key: Sk, fresh: Bool}
+
+def vm.pcs(xs: List<&2, Th>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case Con{Th{pc, caps}, t}:
+      pc <> vm.pcs(t)
+
+def vm.key(st: Vm) -> Sk:
+  Vm{ths, best} = st
+  Sk{vm.pcs(ths), Maybe.is_some(&2, List<&2, Maybe<&2, U32>>, best)}
+
+def pcs.eq(xs: List<&2, U32>, ys: List<&2, U32>) -> Bool:
+  match xs ys:
+    case Nil{} Nil{}:
+      True{}
+    case Con{+a, s} Con{+b, t}:
+      U32.is_eq(a, b) && pcs.eq(s, t)
+    case _ _:
+      False{}
+
+def sk.eq(a: Sk, b: Sk) -> Bool:
+  Sk{p, x} = a
+  Sk{q, y} = b
+  Bool.not(Bool.xor(x, y)) && pcs.eq(p, q)
+
+def pcs.hash(xs: List<&2, U32>, +h: U32) -> U32:
+  match xs:
+    case Nil{}:
+      h
+    case Con{+pc, rest}:
+      pcs.hash(rest, (U32.xor(h, pc) * 16777619 : U32))
+
+def sk.hash(k: Sk) -> U32:
+  Sk{pcs, done} = k
+  U32.and(pcs.hash(pcs, Bool.pick(U32, done, 2166136260, 2166136261)), 2147483647)
+
+def ix.find(xs: List<&2, Ix>, +k: Sk) -> U32:
+  match xs:
+    case Nil{}:
+      seed.id()
+    case Con{Ix{key, +id}, t}:
+      Bool.pick(U32, sk.eq(key, k), id, ix.find(t, k))
+
+def intern.bucket(m: Maybe<&2, List<&2, Ix>>, +k: Sk) -> U32:
+  match m:
+    case None{}:
+      seed.id()
+    case Some{xs}:
+      ix.find(xs, k)
+
+def intern.add(m: Maybe<&2, List<&2, Ix>>, +k: Sk, +n: U32) -> List<&2, Ix>:
+  match m:
+    case None{}:
+      [Ix{k, n}]
+    case Some{xs}:
+      Ix{k, n} <> xs
+
+def intern.if(miss: Bool, +found: U32, +keys: Trie<List<&2, Ix>>, +n: U32, +k: Sk, +hash: U32) -> Ik:
+  match miss:
+    case True{}:
+      Ik{trie.set(List<&2, Ix>, keys, hash, intern.add(trie.at(List<&2, Ix>, keys, hash), k, n)), (n + 1 : U32), n}
+    case False{}:
+      Ik{keys, n, found}
+
+def intern.full(room: Bool, +keys: Trie<List<&2, Ix>>, +n: U32, +k: Sk) -> Ik:
+  match room:
+    case True{}:
+      +hash = sk.hash(k)
+      +found = intern.bucket(trie.at(List<&2, Ix>, keys, hash), k)
+      intern.if(U32.is_eq(found, seed.id()), found, keys, n, k, hash)
+    case False{}:
+      Ik{keys, n, seed.id()}
+
+# A full cache is not searched; the plain Pike VM handles the remaining text.
+def intern(+keys: Trie<List<&2, Ix>>, +n: U32, +cap: U32, +k: Sk) -> Ik:
+  intern.full(U32.is_lt(n, cap), keys, n, k)
+
+# Capture-free DFA
+# ----------------
+# Finds whether a match exists, and where the Pike VM must start to find its captures. A state
+# is the pcs, in priority order, of the threads that passed the char before a position, and the
+# kind of that char: 0 none, at the start of the text; 2 a word char, when the program has a word
+# boundary; 1 any other char. A step closes those threads, the seed below them, between that char
+# and the one read: a thread at IMatch means a match ends before the char read, and the threads
+# that pass it make the next state. A step depends only on the state and the char, so steps on
+# ASCII chars are learned once into a table; wider chars step uncached.
+#
+# A position whose state has no thread is idle: no thread from an earlier start is alive there,
+# and no match ended before it, so the Pike VM started there, with the char before as prev, finds
+# the leftmost-first match the one started at the beginning finds. The DFA keeps the last idle
+# point and hands it on at the first match, or when the cache is full. The idle state of kind k
+# has id k; they are interned first.
+
+# The sets of lead; none without it.
+def lead.sets(m: Maybe<&2, List<&2, Inst>>) -> List<&2, Inst>:
+  match m:
+    case None{}:
+      Nil{}
+    case Some{xs}:
+      xs
+
+# The table of asc; empty without it.
+def asc.or(m: Maybe<&2, Asc>) -> Asc:
+  match m:
+    case None{}:
+      Asc{0, 0, 0, 0}
+    case Some{x}:
+      x
+
+# Byte i of a buffer, from the word that holds it.
+def byte.at(+w: U32, +i: U32) -> U32:
+  (U32.shrn(w, U32.to_nat(((i .&. 3 : U32) * 8 : U32))) .&. 255 : U32)
+
+def dk.none() -> U32:
+  4294967295
+
+def dk.of(+wb: Bool, +c: U32) -> U32:
+  Bool.pick(U32, wb && is_word(c), 2, 1)
+
+# A char of kind k, as an assertion reads it.
+def dk.prev(+k: U32) -> Maybe<&2, Char>:
+  match k:
+    case 0:
+      None{}
+    case 1:
+      Some{Chr{32}}
+    case _:
+      Some{Chr{97}}
+
+# The threads of a state, the seed below them. A DFA keeps no captures.
+def dk.ths(xs: List<&2, U32>) -> List<&2, Th>:
+  match xs:
+    case Nil{}:
+      [Th{0, Nil{}}]
+    case Con{+pc, t}:
+      Th{pc, Nil{}} <> dk.ths(t)
+
+# A state's key: its kind, then its pcs.
+def dk.key(+k: U32, pcs: List<&2, U32>) -> Sk:
+  Sk{k <> pcs, False{}}
+
+def dk.kind(k: Sk) -> U32:
+  match k:
+    case Sk{Con{+x, t}, d}:
+      x
+    case Sk{Nil{}, d}:
+      0
+
+def dk.pcs(k: Sk) -> List<&2, U32>:
+  match k:
+    case Sk{Con{x, t}, d}:
+      t
+    case Sk{Nil{}, d}:
+      Nil{}
+
+# Whether idle states may skip: lead and its table exist.
+def dk.sk(lead: Maybe<&2, List<&2, Inst>>, asc: Maybe<&2, Asc>) -> Bool:
+  match lead asc:
+    case Some{x} Some{y}:
+      True{}
+    case _ _:
+      False{}
+
+# A step: the next state's pcs, and whether a match ends before the char.
+type Dt is Data:
+  Dt{pcs: List<&2, U32>, hit: Bool}
+
+def dt.of(sc: Sc) -> Dt:
+  Sc{items, best, stop} = sc
+  Dt{vm.pcs(List.reverse(&2, Th, items)), stop}
+
+def dt.hit(d: Dt) -> Bool:
+  Dt{pcs, hit} = d
+  hit
+
+def dt.pcs(d: Dt) -> List<&2, U32>:
+  Dt{pcs, hit} = d
+  pcs
+
+# The step from the state key on c; None is the end of the text.
+def dfa.go(+prog: Trie<Inst>, +fuel: Nat, +key: Sk, +c: Maybe<&2, Char>) -> Dt:
+  dt.of(scan(close(fuel, prog, 0, dk.prev(dk.kind(key)), c, Cl{dk.ths(dk.pcs(key)), TTip{}, Nil{}}), prog, c, True{}, Sc{Nil{}, None{}, False{}}))
+
+# The next state, interned, unless a match ended.
+def dfa.ik(hit: Bool, +keys: Trie<List<&2, Ix>>, +n: U32, +cap: U32, +key: Sk) -> Ik:
+  match hit:
+    case True{}:
+      Ik{keys, n, seed.id()}
+    case False{}:
+      intern(keys, n, cap, key)
+
+def ik.keys(k: Ik) -> Trie<List<&2, Ix>>:
+  Ik{keys, n, id} = k
+  keys
+
+def ik.n(k: Ik) -> U32:
+  Ik{keys, n, id} = k
+  n
+
+def ik.id(k: Ik) -> U32:
+  Ik{keys, n, id} = k
+  id
+
+# The index with the idle states.
+def dk.keys(+cap: U32) -> Trie<List<&2, Ix>>:
+  ik.keys(intern(ik.keys(intern(ik.keys(intern(TTip{}, 0, cap, dk.key(0, Nil{}))), 1, cap, dk.key(1, Nil{}))), 2, cap, dk.key(2, Nil{})))
+
+# The states by id, with the idle states.
+def dk.sts(+depth: Nat) -> Array<Sk>:
+  Array.set(Sk, Array.set(Sk, Array.new(Sk, depth, dk.key(0, Nil{})), 1, dk.key(1, Nil{})), 2, dk.key(2, Nil{}))
+
+# A learned step into the table: 1 a match, 2 + the next id, 0 unknown. Wide chars are not cached.
+def dfa.store(cache: Bool, tab: Array<U32>, +idx: U32, +e: U32) -> Array<U32>:
+  match cache:
+    case True{}:
+      Array.set(U32, tab, idx, e)
+    case False{}:
+      tab
+
+def dfa.put(ok: Bool, sts: Array<Sk>, +id: U32, +key: Sk) -> Array<Sk>:
+  match ok:
+    case True{}:
+      Array.set(Sk, sts, id, key)
+    case False{}:
+      sts
+
+# The table entry for a learned step.
+def dfa.entry(+hit: Bool, +id: U32) -> U32:
+  Bool.pick(U32, hit, 1, Bool.pick(U32, U32.is_eq(id, seed.id()), 0, (id + 2 : U32)))
+
+# A learned step: the table, the states, the index, its size, the next id (seed.id() after a
+# match or with a full cache), and whether a match ended.
+type Dl is Type:
+  Dl{tab: Array<U32>, sts: Array<Sk>, keys: Trie<List<&2, Ix>>, n: U32, id: U32, hit: Bool}
+
+# Learn the step from state id on c; r holds the states and id's key.
+def dfa.learn(r: Array<Sk> & Sk, tab: Array<U32>, +keys: Trie<List<&2, Ix>>, +n: U32, +id: U32, +c: U32, +prog: Trie<Inst>, +cfuel: Nat, +wb: Bool, +cap: U32) -> Dl:
+  (sts, +key) = r
+  +got = dfa.go(prog, cfuel, key, Some{Chr{c}})
+  +hit = dt.hit(got)
+  +nk = dk.key(dk.of(wb, c), dt.pcs(got))
+  +ik = dfa.ik(hit, keys, n, cap, nk)
+  +id2 = ik.id(ik)
+  Dl{dfa.store(U32.is_lt(c, 128), tab, ((id * 128) + c : U32), dfa.entry(hit, id2)), dfa.put(U32.is_ne(id2, seed.id()), sts, id2, nk), ik.keys(ik), ik.n(ik), id2, hit}
+
+# The cache size for a text of len chars: states, and the depths of the table and the state array.
+def dk.cap(+len: U32) -> U32:
+  Bool.pick(U32, U32.is_lt(len, 4096), 8, Bool.pick(U32, U32.is_lt(len, 65536), 64, 1024))
+
+def dk.tab(+len: U32) -> Nat:
+  Bool.pick(Nat, U32.is_lt(len, 4096), 10n, Bool.pick(Nat, U32.is_lt(len, 65536), 13n, 17n))
+
+def dk.depth(+len: U32) -> Nat:
+  Bool.pick(Nat, U32.is_lt(len, 4096), 3n, Bool.pick(Nat, U32.is_lt(len, 65536), 6n, 10n))
+
+# What the DFA hands on: no match; a match, which the Pike VM finds from the idle point p; or a
+# full cache, after which the Pike VM runs from p.
+type Dr is Data:
+  DNo{}
+  DHit{p: U32}
+  DFull{p: U32}
+
+def dr.end(hit: Bool, +p: U32) -> Dr:
+  match hit:
+    case True{}:
+      DHit{p}
+    case False{}:
+      DNo{}
+
+def dfas.end(r: Array<Sk> & Sk, +p: U32, +prog: Trie<Inst>, +cfuel: Nat) -> Dr:
+  (sts, +key) = r
+  dr.end(dt.hit(dfa.go(prog, cfuel, key, None{})), p)
+
+# The head of s as a table column; a wide char or the end reads a column it then ignores.
+def str.head(s: String) -> U32:
+  match s:
+    case SNil{}:
+      0
+    case SCon{Chr{+c}, t}:
+      c
+
+# A learn round's result, for the round after it.
+type Dz is Type:
+  Dz0{}
+  DzL{dl: Dl}
+
+# The DFA over a String. mode picks the round: 0 read s's head in state id, or end at SNil;
+# 1 pass the chars of s that cannot start a match, from the idle state id; 2 learn the step
+# from state id on q; 7 take the step learned, from z; 5 a match; 6 a full cache. rt: the table
+# and, in round 0, its entry for id and s's head. i: the position of s's head, q the char before
+# it (in rounds 2 and 7, i is q's position); p: the last idle point. fuel: each char takes at most
+# three rounds. Each value the next round takes is bound first, so no round delays work into it.
+def dfas(fuel: Nat, +mode: U32, z: Dz, +s: String, rt: Array<U32> & U32, sts: Array<Sk>, +keys: Trie<List<&2, Ix>>, +n: U32, +i: U32, +id: U32, +q: U32, +p: U32, +prog: Trie<Inst>, +cfuel: Nat, +wb: Bool, +lead: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +am: Asc, +sets: List<&2, Inst>, +sk: Bool, +cap: U32) -> Dr:
+  match fuel:
+    case 0n:
+      DFull{p}
+    case 1n+f:
+      match mode:
+        case 0:
+          match s:
+            case SNil{}:
+              (tab, e) = rt
+              dfas.end(Array.get(Sk, sts, id), p, prog, cfuel)
+            case SCon{Chr{+x}, +t}:
+              (tab, +e) = rt
+              +ascii = U32.is_lt(x, 128)
+              +adv = ascii && U32.is_le(2, e)
+              +e2 = (e - 2 : U32)
+              +id2 = Bool.pick(U32, adv, e2, id)
+              +idle = adv && U32.is_le(id2, 2)
+              +i1 = (i + 1 : U32)
+              +i2 = Bool.pick(U32, adv, i1, i)
+              +p2 = Bool.pick(U32, idle, i2, p)
+              +hit = ascii && U32.is_eq(e, 1)
+              +mh = Bool.pick(U32, hit, 5, 2)
+              +h = str.head(t)
+              +isk = idle && sk && Bool.not(lead.has(h, am, sets))
+              +mi = Bool.pick(U32, isk, 1, 0)
+              +m = Bool.pick(U32, adv, mi, mh)
+              +col = ((id2 * 128) + h : U32)
+              +idx = Bool.pick(U32, adv, col, 0)
+              rt2 = Array.get(U32, tab, idx)
+              dfas(f, m, Dz0{}, t, rt2, sts, keys, n, i2, id2, x, p2, prog, cfuel, wb, lead, asc, am, sets, sk, cap)
+        case 1:
+          (tab, e) = rt
+          +pass = skip.lead(lead, asc, s, Chr{q})
+          +nn = Pass.n(pass)
+          +q2 = Pass.prev(pass)
+          +s2 = str.drop(U32.to_nat(nn), s)
+          +moved = U32.is_ne(nn, 0)
+          +i2 = (i + nn : U32)
+          +kd = dk.of(wb, q2)
+          +id2 = Bool.pick(U32, moved, kd, id)
+          +p2 = Bool.pick(U32, moved, i2, p)
+          +h = str.head(s2)
+          +idx = ((id2 * 128) + h : U32)
+          rt2 = Array.get(U32, tab, idx)
+          dfas(f, 0, Dz0{}, s2, rt2, sts, keys, n, i2, id2, q2, p2, prog, cfuel, wb, lead, asc, am, sets, sk, cap)
+        case 2:
+          (tab, e) = rt
+          z2 = {DzL{dfa.learn(Array.get(Sk, sts, id), tab, keys, n, id, q, prog, cfuel, wb, cap)} : Dz}
+          rt2 = {(Array.new(U32, 0n, 0), 0) : Array<U32> & U32}
+          sts2 = Array.new(Sk, 0n, dk.key(0, Nil{}))
+          dfas(f, 7, z2, s, rt2, sts2, keys, n, i, id, q, p, prog, cfuel, wb, lead, asc, am, sets, sk, cap)
+        case 7:
+          match z:
+            case DzL{Dl{t2, s2, +k2, +n2, +id2, +hit}}:
+              +ok = U32.is_ne(id2, seed.id())
+              +idle = ok && U32.is_le(id2, 2)
+              +i2 = (i + 1 : U32)
+              +p2 = Bool.pick(U32, idle, i2, p)
+              +isk = idle && sk
+              +m0 = Bool.pick(U32, isk, 1, 0)
+              +m1 = Bool.pick(U32, ok, m0, 6)
+              +m = Bool.pick(U32, hit, 5, m1)
+              +h = str.head(s)
+              +idx = ((id2 * 128) + h : U32)
+              rt2 = Array.get(U32, t2, idx)
+              dfas(f, m, Dz0{}, s, rt2, s2, k2, n2, i2, id2, q, p2, prog, cfuel, wb, lead, asc, am, sets, sk, cap)
+            case Dz0{}:
+              DFull{p}
+        case 5:
+          DHit{p}
+        case _:
+          DFull{p}
+
+# The char before position p of s, or None at 0.
+def str.prev.if(zero: Bool, +p: U32, +s: String) -> Maybe<&2, Char>:
+  match zero:
+    case True{}:
+      None{}
+    case False{}:
+      String.get(s, U32.to_nat((p - 1 : U32)))
+
+# The Pike VM from position p of s; total: the length of s.
+def exec.pike(+s: String, +p: U32, +total: U32, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +lead: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +any: Bool) -> Maybe<&2, List<&2, Maybe<&2, U32>>>:
+  +r = str.drop(U32.to_nat(p), s)
+  run(Nat.add(U32.to_nat((total - p : U32)), 1n), r, prog, fuel, init, start, lead, asc, any, p, run.close(Sc{Nil{}, None{}, False{}}, prog, fuel, init, start, p, str.prev.if(U32.is_eq(p, 0), p, s), String.get(r, 0n)))
+
+# After the DFA: with any, a match found is the answer; else the Pike VM runs from the idle point.
+def exec.dr(d: Dr, +any: Bool, +s: String, +total: U32, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +lead: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>) -> Maybe<&2, List<&2, Maybe<&2, U32>>>:
+  match d:
+    case DNo{}:
+      None{}
+    case DHit{+p}:
+      match any:
+        case True{}:
+          Some{Nil{}}
+        case False{}:
+          exec.pike(s, p, total, prog, fuel, init, start, lead, asc, any)
+    case DFull{+p}:
+      exec.pike(s, p, total, prog, fuel, init, start, lead, asc, any)
+
 type Span is Data:
   Span{start: U32, end: U32}
 
@@ -1421,9 +1846,13 @@ def find.spans(m: Maybe<&2, List<&2, Maybe<&2, U32>>>) -> Maybe<&2, List<&2, May
 
 # slots: capture slots to keep; is_match keeps none, so each ISave is free.
 def exec(re: Regex, +s: String, +any: Bool) -> Maybe<&2, List<&2, Maybe<&2, U32>>>:
-  Regex{+prog, +fuel, +slots, +start, +lead, bits, +asc, plain, must, reverse} = re
+  Regex{+prog, +fuel, +slots, +start, +lead, bits, +asc, +plain, must, reverse} = re
   +init = List.replicate(Maybe<&2, U32>, Bool.pick(Nat, any, 0n, slots), None{})
-  run(Nat.add(String.length(s), 1n), s, prog, fuel, init, start, lead, asc, any, 0, run.close(Sc{Nil{}, None{}, False{}}, prog, fuel, init, start, 0, None{}, String.get(s, 0n)))
+  +len = String.length(s)
+  +total = U32.from_nat(len)
+  +cap = dk.cap(total)
+  +sk = dk.sk(lead, asc)
+  exec.dr(dfas(Nat.add(Nat.mul(3n, len), 8n), Bool.pick(U32, sk, 1, 0), Dz0{}, s, Array.get(U32, Array.new(U32, dk.tab(total), 0), str.head(s)), dk.sts(dk.depth(total)), dk.keys(cap), 3, 0, 0, dk.none(), 0, prog, fuel, Bool.not(plain), lead, asc, asc.or(asc), lead.sets(lead), sk, cap), any, s, total, prog, fuel, init, start, lead, asc)
 
 # The leftmost match in s: the span of group 0, then of each group; None for a group that did not take part.
 def find(re: Regex, +s: String) -> Maybe<&2, List<&2, Maybe<&2, Span>>>:
@@ -1719,112 +2148,6 @@ def runb(fuel: Nat, r: Rb, +len: U32, +prog: Trie<Inst>, +cfuel: Nat, +init: Lis
 # that on the real captures. Inside the text ^ and $ always fail, so a transition does not depend
 # on the chars around it; the last char, which sees the end, takes the plain step. Word boundaries
 # read the chars on both sides, so programs with them keep the plain Pike VM.
-
-# The seed thread's index, and the id of a state the full cache could not add.
-def seed.id() -> U32:
-  4294967295
-
-# A new thread: pc, the thread at src it came from (or the seed), and the slots it saved.
-type Op is Data:
-  Op{src: U32, pc: U32, saves: List<&2, U32>}
-
-# next: the state after the char; hit: 1 + the index of the thread that matched, or 0;
-# fresh: no match yet and every new thread comes from the seed, so the next state is a fresh start.
-type Tr is Data:
-  TrNo{}
-  TrSame{}
-  Tr{next: U32, hit: U32, outs: List<&2, Op>, fresh: Bool}
-
-type Sk is Data:
-  Sk{pcs: List<&2, U32>, done: Bool}
-
-type Ix is Data:
-  Ix{key: Sk, id: U32}
-
-# The interned states, how many there are, and the id of one.
-type Ik is Data:
-  Ik{keys: Trie<List<&2, Ix>>, n: U32, id: U32}
-
-# A learned transition, with the next state's key in place of its id.
-type Lr is Data:
-  Lr{hit: U32, outs: List<&2, Op>, key: Sk, fresh: Bool}
-
-def vm.pcs(xs: List<&2, Th>) -> List<&2, U32>:
-  match xs:
-    case Nil{}:
-      Nil{}
-    case Con{Th{pc, caps}, t}:
-      pc <> vm.pcs(t)
-
-def vm.key(st: Vm) -> Sk:
-  Vm{ths, best} = st
-  Sk{vm.pcs(ths), Maybe.is_some(&2, List<&2, Maybe<&2, U32>>, best)}
-
-def pcs.eq(xs: List<&2, U32>, ys: List<&2, U32>) -> Bool:
-  match xs ys:
-    case Nil{} Nil{}:
-      True{}
-    case Con{+a, s} Con{+b, t}:
-      U32.is_eq(a, b) && pcs.eq(s, t)
-    case _ _:
-      False{}
-
-def sk.eq(a: Sk, b: Sk) -> Bool:
-  Sk{p, x} = a
-  Sk{q, y} = b
-  Bool.not(Bool.xor(x, y)) && pcs.eq(p, q)
-
-def pcs.hash(xs: List<&2, U32>, +h: U32) -> U32:
-  match xs:
-    case Nil{}:
-      h
-    case Con{+pc, rest}:
-      pcs.hash(rest, (U32.xor(h, pc) * 16777619 : U32))
-
-def sk.hash(k: Sk) -> U32:
-  Sk{pcs, done} = k
-  U32.and(pcs.hash(pcs, Bool.pick(U32, done, 2166136260, 2166136261)), 2147483647)
-
-def ix.find(xs: List<&2, Ix>, +k: Sk) -> U32:
-  match xs:
-    case Nil{}:
-      seed.id()
-    case Con{Ix{key, +id}, t}:
-      Bool.pick(U32, sk.eq(key, k), id, ix.find(t, k))
-
-def intern.bucket(m: Maybe<&2, List<&2, Ix>>, +k: Sk) -> U32:
-  match m:
-    case None{}:
-      seed.id()
-    case Some{xs}:
-      ix.find(xs, k)
-
-def intern.add(m: Maybe<&2, List<&2, Ix>>, +k: Sk, +n: U32) -> List<&2, Ix>:
-  match m:
-    case None{}:
-      [Ix{k, n}]
-    case Some{xs}:
-      Ix{k, n} <> xs
-
-def intern.if(miss: Bool, +found: U32, +keys: Trie<List<&2, Ix>>, +n: U32, +k: Sk, +hash: U32) -> Ik:
-  match miss:
-    case True{}:
-      Ik{trie.set(List<&2, Ix>, keys, hash, intern.add(trie.at(List<&2, Ix>, keys, hash), k, n)), (n + 1 : U32), n}
-    case False{}:
-      Ik{keys, n, found}
-
-def intern.full(room: Bool, +keys: Trie<List<&2, Ix>>, +n: U32, +k: Sk) -> Ik:
-  match room:
-    case True{}:
-      +hash = sk.hash(k)
-      +found = intern.bucket(trie.at(List<&2, Ix>, keys, hash), k)
-      intern.if(U32.is_eq(found, seed.id()), found, keys, n, k, hash)
-    case False{}:
-      Ik{keys, n, seed.id()}
-
-# A full cache is not searched; the plain Pike VM handles the remaining text.
-def intern(+keys: Trie<List<&2, Ix>>, +n: U32, +cap: U32, +k: Sk) -> Ik:
-  intern.full(U32.is_lt(n, cap), keys, n, k)
 
 def sym.caps(+slots: Nat, +i: U32) -> List<&2, Maybe<&2, U32>>:
   List.append(&2, Maybe<&2, U32>, List.replicate(Maybe<&2, U32>, slots, None{}), [Some{i}])
@@ -2326,9 +2649,222 @@ def exec.bytes.go.if(use: Bool, +len: U32, +from: U32, buf: Array<U32>, +prog: T
 def exec.bytes.go(plain: Bool, +len: U32, +from: U32, buf: Array<U32>, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +any: Bool, +slots: Nat) -> Array<U32> & Maybe<&2, List<&2, Maybe<&2, U32>>>:
   exec.bytes.go.if(plain && (U32.is_le(4096, len) || Bool.not(Nat.is_ge(fuel, 300n))), len, from, buf, prog, fuel, init, start, asc, any, slots)
 
-def exec.bytes.run(b: Bytes.Bytes, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
+# The DFA over Bytes
+# -------------------
+def dc.c(d: Dc) -> U32:
+  match d:
+    case Dc{+c, w}:
+      c
+    case DEnd{}:
+      65533
+
+def dc.w(d: Dc) -> U32:
+  match d:
+    case Dc{c, +w}:
+      w
+    case DEnd{}:
+      1
+
+# A decoded char packed in one word: its width above bit 24, its code point below; 0 at the end.
+def dc.pack(d: Dc) -> U32:
+  match d:
+    case Dc{+c, +w}:
+      ((w << 24n) .|. c : U32)
+    case DEnd{}:
+      0
+
+def dec.pack.of(r: Array<U32> & Dc) -> Array<U32> & U32:
+  (a, +d) = r
+  (a, dc.pack(d))
+
+def dec.pack(a: Array<U32>, +len: U32, +i: U32) -> Array<U32> & U32:
+  dec.pack.of(dec(a, len, i))
+
+# Skip from k to the next char that may start a match: ASCII bytes by the table m, wide chars by
+# the sets of lead. ph: 1 r holds the table skip's offset, so decode the char there; 0 r holds
+# the char at k, packed; 2 r holds the answer. fuel: every two rounds pass at least one byte.
+def skip.wide(fuel: Nat, +ph: U32, r: Array<U32> & U32, +len: U32, +k: U32, +m: Asc, +sets: List<&2, Inst>) -> Array<U32> & U32:
+  match fuel:
+    case 0n:
+      (a, x) = r
+      (a, k)
+    case 1n+f:
+      match ph:
+        case 1:
+          (a, +k2) = r
+          r2 = dec.pack(a, len, k2)
+          skip.wide(f, 0, r2, len, k2, m, sets)
+        case 0:
+          (a, +cw) = r
+          +c = (cw .&. 16777215 : U32)
+          +w = (cw >> 24n : U32)
+          +stop = U32.is_eq(w, 0) || U32.is_lt(c, 128) || starts(sets, c)
+          +kw = (k + w : U32)
+          +at = Bool.pick(U32, stop, k, kw)
+          +ph2 = Bool.pick(U32, stop, 2, 1)
+          r2 = skip.from(a, len, at, m)
+          skip.wide(f, ph2, r2, len, k, m, sets)
+        case _:
+          r
+
+# The round after a step to state id, the next char at i: 6 the cache is full, 4 the end of the
+# text, 1 an idle state that skips, else ready (0 when the next read is primed, else 8).
+def dfa.mode(+id: U32, +i: U32, +len: U32, +sk: Bool, +ready: U32) -> U32:
+  +full = U32.is_eq(id, seed.id())
+  +more = U32.is_lt(i, len)
+  +isk = sk && U32.is_le(id, 2)
+  +m0 = Bool.pick(U32, isk, 1, ready)
+  +m1 = Bool.pick(U32, more, m0, 4)
+  Bool.pick(U32, full, 6, m1)
+
+def dfab.end(r: Array<Sk> & Sk, a: Array<U32>, +p: U32, +prog: Trie<Inst>, +cfuel: Nat) -> Array<U32> & Dr:
+  (sts, +key) = r
+  (a, dr.end(dt.hit(dfa.go(prog, cfuel, key, None{})), p))
+
+# A step learned over bytes: the buffer, the char's width, the step.
+type Dlb is Type:
+  Dlb{a: Array<U32>, w: U32, dl: Dl}
+
+type Dzb is Type:
+  Dzb0{}
+  DzbL{dl: Dlb}
+
+def dfab.learn(rd: Array<U32> & Dc, r: Array<Sk> & Sk, tab: Array<U32>, +keys: Trie<List<&2, Ix>>, +n: U32, +id: U32, +prog: Trie<Inst>, +cfuel: Nat, +wb: Bool, +cap: U32) -> Dlb:
+  (a, +d) = rd
+  Dlb{a, dc.w(d), dfa.learn(r, tab, keys, n, id, dc.c(d), prog, cfuel, wb, cap)}
+
+# The DFA over the bytes of a, up to len. mode picks the round: 0 read the byte b at i in state
+# id; 8 prime round 0 at i; 1 skip from the idle state id at i; 9 take the skip's offset; 10 take
+# the kind of the byte before i; 2 learn the step on the char at i; 7 take it, from z; 4 the end
+# of the text; 5 a match; 6 a full cache. A read hands back the array beside the value, and a
+# round may not take apart a computed value, so each round passes its reads to the next: ra the
+# buffer and, in round 0, the byte after b; rt the table and, in round 0, its entry for id and b.
+# p: the last idle point. fuel: each byte takes at most six rounds. Each value the next round
+# takes is bound first, so no round delays work into it.
+def dfab(fuel: Nat, +mode: U32, z: Dzb, ra: Array<U32> & U32, rt: Array<U32> & U32, sts: Array<Sk>, +keys: Trie<List<&2, Ix>>, +n: U32, +len: U32, +i: U32, +id: U32, +p: U32, +b: U32, +prog: Trie<Inst>, +cfuel: Nat, +wb: Bool, +am: Asc, +sets: List<&2, Inst>, +sk: Bool, +cap: U32) -> Array<U32> & Dr:
+  match fuel:
+    case 0n:
+      (a, x) = ra
+      (a, DFull{p})
+    case 1n+f:
+      match mode:
+        case 0:
+          (a, +wn) = ra
+          (tab, +e) = rt
+          +bn = byte.at(wn, (i + 1 : U32))
+          +ascii = U32.is_lt(b, 128)
+          +adv = ascii && U32.is_le(2, e)
+          +e2 = (e - 2 : U32)
+          +id2 = Bool.pick(U32, adv, e2, id)
+          +i1 = (i + 1 : U32)
+          +i2 = Bool.pick(U32, adv, i1, i)
+          +idle = adv && U32.is_le(id2, 2)
+          +p2 = Bool.pick(U32, idle, i2, p)
+          +far = sk && Bool.not(asc.has(bn, am))
+          +md = dfa.mode(id2, i2, len, far, 0)
+          +hit = ascii && U32.is_eq(e, 1)
+          +mh = Bool.pick(U32, hit, 5, 2)
+          +m = Bool.pick(U32, adv, md, mh)
+          +b2 = Bool.pick(U32, adv, bn, b)
+          +nx = (i2 + 1 : U32)
+          +col = ((id2 * 128) + bn : U32)
+          +idx = Bool.pick(U32, adv, col, 0)
+          ra2 = Array.get(U32, a, (nx >> 2n : U32))
+          rt2 = Array.get(U32, tab, idx)
+          dfab(f, m, Dzb0{}, ra2, rt2, sts, keys, n, len, i2, id2, p2, b2, prog, cfuel, wb, am, sets, sk, cap)
+        case 1:
+          (a, x) = ra
+          ra2 = skip.wide(Nat.add(Nat.mul(2n, U32.to_nat((len - i : U32))), 4n), 1, skip.from(a, len, i, am), len, i, am, sets)
+          dfab(f, 9, Dzb0{}, ra2, rt, sts, keys, n, len, i, id, p, b, prog, cfuel, wb, am, sets, sk, cap)
+        case 2:
+          (a, x) = ra
+          (tab, e) = rt
+          z2 = {DzbL{dfab.learn(dec(a, len, i), Array.get(Sk, sts, id), tab, keys, n, id, prog, cfuel, wb, cap)} : Dzb}
+          ra2 = {(Array.new(U32, 0n, 0), 0) : Array<U32> & U32}
+          rt2 = {(Array.new(U32, 0n, 0), 0) : Array<U32> & U32}
+          sts2 = Array.new(Sk, 0n, dk.key(0, Nil{}))
+          dfab(f, 7, z2, ra2, rt2, sts2, keys, n, len, i, id, p, b, prog, cfuel, wb, am, sets, sk, cap)
+        case 7:
+          match z:
+            case DzbL{Dlb{a2, +w, Dl{t2, s2, +k2, +n2, +id2, +hit}}}:
+              +i2 = (i + w : U32)
+              +md = dfa.mode(id2, i2, len, sk, 8)
+              +m = Bool.pick(U32, hit, 5, md)
+              +idle = U32.is_ne(id2, seed.id()) && U32.is_le(id2, 2)
+              +p2 = Bool.pick(U32, idle, i2, p)
+              ra2 = Array.get(U32, a2, (i2 >> 2n : U32))
+              rt2 = {(t2, 0) : Array<U32> & U32}
+              dfab(f, m, Dzb0{}, ra2, rt2, s2, k2, n2, len, i2, id2, p2, b, prog, cfuel, wb, am, sets, sk, cap)
+            case Dzb0{}:
+              (a, x) = ra
+              (a, DFull{p})
+        case 8:
+          (a, +w0) = ra
+          (tab, e) = rt
+          +bc = byte.at(w0, i)
+          +nx = (i + 1 : U32)
+          +idx = ((id * 128) + bc : U32)
+          ra2 = Array.get(U32, a, (nx >> 2n : U32))
+          rt2 = Array.get(U32, tab, idx)
+          dfab(f, 0, Dzb0{}, ra2, rt2, sts, keys, n, len, i, id, p, bc, prog, cfuel, wb, am, sets, sk, cap)
+        case 9:
+          (a, +k) = ra
+          +moved = U32.is_ne(k, i)
+          +km = (k - 1 : U32)
+          +at = Bool.pick(U32, moved, km, k)
+          +m = Bool.pick(U32, moved, 10, 8)
+          ra2 = Array.get(U32, a, (at >> 2n : U32))
+          dfab(f, m, Dzb0{}, ra2, rt, sts, keys, n, len, k, id, p, b, prog, cfuel, wb, am, sets, sk, cap)
+        case 10:
+          (a, +w0) = ra
+          +pb = byte.at(w0, (i - 1 : U32))
+          +more = U32.is_lt(i, len)
+          +m = Bool.pick(U32, more, 8, 4)
+          +kw = dk.of(wb, pb)
+          +low = U32.is_lt(pb, 128)
+          +kd = Bool.pick(U32, low, kw, 1)
+          ra2 = Array.get(U32, a, (i >> 2n : U32))
+          dfab(f, m, Dzb0{}, ra2, rt, sts, keys, n, len, i, kd, i, b, prog, cfuel, wb, am, sets, sk, cap)
+        case 4:
+          (a, x) = ra
+          dfab.end(Array.get(Sk, sts, id), a, p, prog, cfuel)
+        case 5:
+          (a, x) = ra
+          (a, DHit{p})
+        case _:
+          (a, x) = ra
+          (a, DFull{p})
+
+# The DFA from byte from: the state there is idle, of the kind of the byte before.
+def dfab.init(r: Array<U32> & U32, +len: U32, +from: U32, +prog: Trie<Inst>, +cfuel: Nat, +wb: Bool, +asc: Maybe<&2, Asc>, +lead: Maybe<&2, List<&2, Inst>>) -> Array<U32> & Dr:
+  (a, +pb) = r
+  +id = Bool.pick(U32, U32.is_eq(from, 0), 0, Bool.pick(U32, U32.is_lt(pb, 128), dk.of(wb, pb), 1))
+  +rest = (len - from : U32)
+  +cap = dk.cap(rest)
+  +sk = dk.sk(lead, asc)
+  dfab(Nat.add(Nat.mul(6n, U32.to_nat(rest)), 16n), dfa.mode(id, from, len, sk, 8), Dzb0{}, Array.get(U32, a, (from >> 2n : U32)), (Array.new(U32, dk.tab(rest), 0), 0), dk.sts(dk.depth(rest)), dk.keys(cap), 3, len, from, id, from, 0, prog, cfuel, wb, asc.or(asc), lead.sets(lead), sk, cap)
+
+def exec.bytes.hit(any: Bool, a: Array<U32>, +len: U32, +p: U32, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +slots: Nat) -> Array<U32> & Maybe<&2, List<&2, Maybe<&2, U32>>>:
+  match any:
+    case True{}:
+      (a, Some{Nil{}})
+    case False{}:
+      exec.bytes.go(plain, len, p, a, prog, fuel, init, start, asc, False{}, slots)
+
+# After the DFA: with any, a match found is the answer; else the Pike VM runs from the idle point.
+def exec.bytes.dr(r: Array<U32> & Dr, +len: U32, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +any: Bool, +slots: Nat) -> Array<U32> & Maybe<&2, List<&2, Maybe<&2, U32>>>:
+  (a, +d) = r
+  match d:
+    case DNo{}:
+      (a, None{})
+    case DHit{+p}:
+      exec.bytes.hit(any, a, len, p, plain, prog, fuel, init, start, asc, slots)
+    case DFull{+p}:
+      exec.bytes.go(plain, len, p, a, prog, fuel, init, start, asc, any, slots)
+
+def exec.bytes.run(b: Bytes.Bytes, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +lead: Maybe<&2, List<&2, Inst>>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
   Bytes.Bytes{+len, buf} = b
-  exec.bytes.fin(len, exec.bytes.go(plain, len, 0, buf, prog, fuel, init, start, asc, any, slots))
+  exec.bytes.fin(len, exec.bytes.dr(dfab.init(Bytes.peek(buf, 4294967295), len, 0, prog, fuel, Bool.not(plain), asc, lead), len, plain, prog, fuel, init, start, asc, any, slots))
 
 
 def rev.best(hit: Bool, +i: U32, prev: Maybe<&2, U32>) -> Maybe<&2, U32>:
@@ -2443,49 +2979,49 @@ def rev.confirm.best(best: Maybe<&2, U32>, b: Bytes.Bytes, +plain: Bool, +prog: 
       exec.bytes.at(b, k, plain, prog, fuel, init, start, asc, any, slots)
 
 
-def rev.confirm(r: RevFound, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
+def rev.confirm(r: RevFound, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +lead: Maybe<&2, List<&2, Inst>>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
   RevFound{b, best, safe} = r
   match safe:
     case False{}:
-      exec.bytes.run(b, plain, prog, fuel, init, start, asc, any, slots)
+      exec.bytes.run(b, plain, prog, fuel, init, start, asc, lead, any, slots)
     case True{}:
       rev.confirm.best(best, b, plain, prog, fuel, init, start, asc, any, slots)
 
-def exec.bytes.candidate(r: Bytes.Bytes & Maybe<&2, U32>, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
+def exec.bytes.candidate(r: Bytes.Bytes & Maybe<&2, U32>, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +lead: Maybe<&2, List<&2, Inst>>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
   (b, hit) = r
   match hit:
     case None{}:
       (b, None{})
     case Some{i}:
-      exec.bytes.run(b, plain, prog, fuel, init, start, asc, any, slots)
+      exec.bytes.run(b, plain, prog, fuel, init, start, asc, lead, any, slots)
 
-def exec.bytes.reverse(r: Bytes.Bytes & Maybe<&2, U32>, bits: Bits, +needle: String, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
+def exec.bytes.reverse(r: Bytes.Bytes & Maybe<&2, U32>, bits: Bits, +needle: String, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +lead: Maybe<&2, List<&2, Inst>>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
   (b, hit) = r
-  rev.confirm(rev.candidates(16n, Seek{hit, b, None{}}, needle, bits), plain, prog, fuel, init, start, asc, any, slots)
+  rev.confirm(rev.candidates(16n, Seek{hit, b, None{}}, needle, bits), plain, prog, fuel, init, start, asc, lead, any, slots)
 
-def exec.bytes.select(rev: Maybe<&2, Bits>, r: Bytes.Bytes & Maybe<&2, U32>, +needle: String, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
+def exec.bytes.select(rev: Maybe<&2, Bits>, r: Bytes.Bytes & Maybe<&2, U32>, +needle: String, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +lead: Maybe<&2, List<&2, Inst>>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
   match rev:
     case None{}:
-      exec.bytes.candidate(r, plain, prog, fuel, init, start, asc, any, slots)
+      exec.bytes.candidate(r, plain, prog, fuel, init, start, asc, lead, any, slots)
     case Some{x}:
-      exec.bytes.reverse(r, x, needle, plain, prog, fuel, init, start, asc, any, slots)
+      exec.bytes.reverse(r, x, needle, plain, prog, fuel, init, start, asc, lead, any, slots)
 
 
-def exec.bytes.must.hit(b: Bytes.Bytes, rev: Maybe<&2, Bits>, +c: U32, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
+def exec.bytes.must.hit(b: Bytes.Bytes, rev: Maybe<&2, Bits>, +c: U32, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +lead: Maybe<&2, List<&2, Inst>>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
   +needle = {SCon{Chr{c}, SNil{}} : String}
-  exec.bytes.select(rev, Bytes.find(b, needle), needle, plain, prog, fuel, init, start, asc, any, slots)
+  exec.bytes.select(rev, Bytes.find(b, needle), needle, plain, prog, fuel, init, start, asc, lead, any, slots)
 
-def exec.bytes.must(m: Maybe<&2, U32>, rev: Maybe<&2, Bits>, b: Bytes.Bytes, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
+def exec.bytes.must(m: Maybe<&2, U32>, rev: Maybe<&2, Bits>, b: Bytes.Bytes, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +lead: Maybe<&2, List<&2, Inst>>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
   match m:
     case None{}:
-      exec.bytes.run(b, plain, prog, fuel, init, start, asc, any, slots)
+      exec.bytes.run(b, plain, prog, fuel, init, start, asc, lead, any, slots)
     case Some{c}:
-      exec.bytes.must.hit(b, rev, c, plain, prog, fuel, init, start, asc, any, slots)
+      exec.bytes.must.hit(b, rev, c, plain, prog, fuel, init, start, asc, lead, any, slots)
 
 def exec.bytes(re: Regex, b: Bytes.Bytes, +any: Bool) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
-  Regex{+prog, +fuel, +slots, +start, lead, bits, +asc, plain, must, reverse} = re
+  Regex{+prog, +fuel, +slots, +start, +lead, bits, +asc, plain, must, reverse} = re
   +sl = Bool.pick(Nat, any, 0n, slots)
-  exec.bytes.must(must, reverse, b, plain, prog, fuel, List.replicate(Maybe<&2, U32>, sl, None{}), start, asc, any, sl)
+  exec.bytes.must(must, reverse, b, plain, prog, fuel, List.replicate(Maybe<&2, U32>, sl, None{}), start, asc, lead, any, sl)
 
 def find.bytes.fin(r: Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, Span>>>:
   (b, m) = r

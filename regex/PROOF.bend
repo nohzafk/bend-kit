@@ -541,3 +541,69 @@ def Laws.lead_fold_boundary():
 
 def Laws.lead_fold_boundary_bytes():
   {==}
+
+def Laws.dfa_full():
+  {==}
+
+def Laws.dfa_full_bytes():
+  {==}
+
+def Laws.dfa_full_none():
+  {==}
+
+def Laws.dfa_full_none_bytes():
+  {==}
+
+def Laws.dfa_idle_prev():
+  {==}
+
+def Laws.dfa_idle_prev_bytes():
+  {==}
+
+def Laws.dfa_wide():
+  {==}
+
+def Laws.dfa_wide_bytes():
+  {==}
+
+def Laws.dfa_wide_lit():
+  {==}
+
+def Laws.dfa_wide_lit_bytes():
+  {==}
+
+def Laws.dfa_groups():
+  {==}
+
+def Laws.dfa_groups_bytes():
+  {==}
+
+def Laws.dfa_end():
+  {==}
+
+def Laws.dfa_end_bytes():
+  {==}
+
+def Laws.dfa_empty_text():
+  {==}
+
+def Laws.dfa_empty_text_bytes():
+  {==}
+
+def Laws.dfa_fold_wide():
+  {==}
+
+def Laws.dfa_fold_wide_bytes():
+  {==}
+
+def Laws.dfa_hit_boundary():
+  {==}
+
+def Laws.dfa_hit_boundary_bytes():
+  {==}
+
+def Laws.dfa_miss_boundary():
+  {==}
+
+def Laws.dfa_miss_boundary_bytes():
+  {==}
