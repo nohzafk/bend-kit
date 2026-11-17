@@ -1077,12 +1077,656 @@ def asc.word(k: U32, a: Asc) -> U32:
 def asc.has(+b: U32, a: Asc) -> Bool:
   U32.is_le(128, b) || U32.is_ne((U32.shrn(asc.word((b >> 5n : U32), a), U32.to_nat((b .&. 31 : U32))) .&. 1 : U32), 0)
 
+# Required literals
+# -----------------
+# A literal is a sequence of sets: a text holds it at k when its unit at k+j is in set j for each
+# j. Over a String the units are code points; over Bytes they are bytes. A Need is literals one of
+# which every match contains, and far: the most units from a match's start to the start of that
+# literal, or None when unbounded. A set is a node's own set, so under (?i) it holds every
+# equivalent the node matches.
+type Need is Data:
+  Need{lits: List<&2, List<&2, List<&2, U32>>>, far: Maybe<&2, U32>}
+
+# What every match of a node holds. exact: the literal every match spells out whole, when it has
+# at most 32 sets; pre: a literal every match starts with; max: the most units a match takes, None
+# when unbounded or past lt.cap(); cand: the best Need inside the node, far counted from its start.
+type Lt is Data:
+  Lt{exact: Maybe<&2, List<&2, List<&2, U32>>>, pre: List<&2, List<&2, U32>>, max: Maybe<&2, U32>, cand: Maybe<&2, Need>}
+
+def lt.cap() -> U32:
+  1048576
+
+def mx.add(a: Maybe<&2, U32>, b: Maybe<&2, U32>) -> Maybe<&2, U32>:
+  match a b:
+    case Some{+x} Some{+y}:
+      Bool.pick(Maybe<&2, U32>, U32.is_le(x, lt.cap()) && U32.is_le(y, lt.cap()) && U32.is_le((x + y : U32), lt.cap()), Some{(x + y : U32)}, None{})
+    case _ _:
+      None{}
+
+def mx.max(a: Maybe<&2, U32>, b: Maybe<&2, U32>) -> Maybe<&2, U32>:
+  match a b:
+    case Some{+x} Some{+y}:
+      Some{Bool.pick(U32, U32.is_lt(x, y), y, x)}
+    case _ _:
+      None{}
+
+# The length of the shortest literal of xs, or acc.
+def lits.short(xs: List<&2, List<&2, List<&2, U32>>>, +acc: U32) -> U32:
+  match xs:
+    case Nil{}:
+      acc
+    case Con{l, t}:
+      +n = U32.from_nat(List.length(&2, List<&2, U32>, l))
+      lits.short(t, Bool.pick(U32, U32.is_lt(n, acc), n, acc))
+
+# Longer literals first, then a bounded far.
+def need.score(n: Need) -> U32:
+  Need{lits, far} = n
+  ((2 * lits.short(lits, 4294967295)) + Bool.pick(U32, Maybe.is_some(&2, U32, far), 1, 0) : U32)
+
+# The better of a and b; a on a tie.
+def need.best(a: Maybe<&2, Need>, b: Maybe<&2, Need>) -> Maybe<&2, Need>:
+  match a b:
+    case Some{+x} Some{+y}:
+      Bool.pick(Maybe<&2, Need>, U32.is_le(need.score(y), need.score(x)), Some{x}, Some{y})
+    case Some{x} None{}:
+      Some{x}
+    case None{} y:
+      y
+
+def need.shift(c: Maybe<&2, Need>, m: Maybe<&2, U32>) -> Maybe<&2, Need>:
+  match c:
+    case None{}:
+      None{}
+    case Some{Need{lits, far}}:
+      Some{Need{lits, mx.add(m, far)}}
+
+def need.pre(p: List<&2, List<&2, U32>>) -> Maybe<&2, Need>:
+  match p:
+    case Nil{}:
+      None{}
+    case Con{h, t}:
+      Some{Need{[h <> t], Some{0}}}
+
+# One literal of each branch: at most 8 in all.
+def need.alt(a: Maybe<&2, Need>, b: Maybe<&2, Need>) -> Maybe<&2, Need>:
+  match a b:
+    case Some{Need{+la, fa}} Some{Need{+lb, fb}}:
+      +n = Nat.add(List.length(&2, List<&2, List<&2, U32>>, la), List.length(&2, List<&2, List<&2, U32>>, lb))
+      Bool.pick(Maybe<&2, Need>, Nat.is_ge(8n, n), Some{Need{List.append(&2, List<&2, List<&2, U32>>, la, lb), mx.max(fa, fb)}}, None{})
+    case _ _:
+      None{}
+
+def lt.exact(ea: Maybe<&2, List<&2, List<&2, U32>>>, eb: Maybe<&2, List<&2, List<&2, U32>>>) -> Maybe<&2, List<&2, List<&2, U32>>>:
+  match ea eb:
+    case Some{+x} Some{+y}:
+      +n = Nat.add(List.length(&2, List<&2, U32>, x), List.length(&2, List<&2, U32>, y))
+      Bool.pick(Maybe<&2, List<&2, List<&2, U32>>>, Nat.is_ge(32n, n), Some{List.append(&2, List<&2, U32>, x, y)}, None{})
+    case _ _:
+      None{}
+
+def lt.pre(ea: Maybe<&2, List<&2, List<&2, U32>>>, pa: List<&2, List<&2, U32>>, pb: List<&2, List<&2, U32>>) -> List<&2, List<&2, U32>>:
+  match ea:
+    case Some{x}:
+      List.take(&2, List<&2, U32>, List.append(&2, List<&2, U32>, x, pb), 32n)
+    case None{}:
+      pa
+
+def lt.cat(x: Lt, y: Lt) -> Lt:
+  match x y:
+    case Lt{+ea, pa, +ma, ca} Lt{eb, pb, mb, cb}:
+      Lt{lt.exact(ea, eb), lt.pre(ea, pa, pb), mx.add(ma, mb), need.best(ca, need.shift(cb, ma))}
+
+def lt.alt(x: Lt, y: Lt) -> Lt:
+  match x y:
+    case Lt{ea, pa, ma, ca} Lt{eb, pb, mb, cb}:
+      Lt{None{}, Nil{}, mx.max(ma, mb), need.alt(ca, cb)}
+
+# A node that matches only the empty text spells it out.
+def lt.ezero(e: Maybe<&2, List<&2, List<&2, U32>>>) -> Maybe<&2, List<&2, List<&2, U32>>>:
+  match e:
+    case Some{Nil{}}:
+      Some{Nil{}}
+    case _:
+      None{}
+
+def lt.pmax(m: Maybe<&2, U32>) -> Maybe<&2, U32>:
+  match m:
+    case Some{+x}:
+      Bool.pick(Maybe<&2, U32>, U32.is_eq(x, 0), Some{0}, None{})
+    case None{}:
+      None{}
+
+# Every match of a+ starts with a match of a.
+def lt.plus(x: Lt) -> Lt:
+  match x:
+    case Lt{ea, pa, ma, ca}:
+      Lt{lt.ezero(ea), pa, lt.pmax(ma), ca}
+
+def lt.quest(x: Lt) -> Lt:
+  match x:
+    case Lt{ea, pa, ma, ca}:
+      Lt{lt.ezero(ea), Nil{}, ma, None{}}
+
+def lt.zero() -> Lt:
+  Lt{Some{Nil{}}, Nil{}, Some{0}, None{}}
+
+def lt.none(+w: U32) -> Lt:
+  Lt{None{}, Nil{}, Some{w}, None{}}
+
+# The code points of a set made of single points only, or None.
+def set.pts(items: List<&2, Item>, acc: List<&2, U32>) -> Maybe<&2, List<&2, U32>>:
+  match items:
+    case Nil{}:
+      Some{acc}
+    case Con{Rng{+lo, +hi}, t}:
+      Bool.pick(Maybe<&2, List<&2, U32>>, U32.is_eq(lo, hi), set.pts(t, lo <> acc), None{})
+    case Con{h, t}:
+      None{}
+
+def pts.ascii(xs: List<&2, U32>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case Con{+x, t}:
+      U32.is_lt(x, 128) && pts.ascii(t)
+
+def u8w(+c: U32) -> U32:
+  Bool.pick(U32, U32.is_lt(c, 128), 1, Bool.pick(U32, U32.is_lt(c, 2048), 2, Bool.pick(U32, U32.is_lt(c, 65536), 3, 4)))
+
+# The UTF-8 bytes of c, one set each.
+def u8(+c: U32) -> List<&2, List<&2, U32>>:
+  +w = u8w(c)
+  +x0 = (c .&. 63 : U32)
+  +x1 = ((c >> 6n) .&. 63 : U32)
+  +x2 = ((c >> 12n) .&. 63 : U32)
+  Bool.pick(List<&2, List<&2, U32>>, U32.is_eq(w, 1), [[c]], Bool.pick(List<&2, List<&2, U32>>, U32.is_eq(w, 2), [[(192 .|. (c >> 6n) : U32)], [(128 .|. x0 : U32)]], Bool.pick(List<&2, List<&2, U32>>, U32.is_eq(w, 3), [[(224 .|. (c >> 12n) : U32)], [(128 .|. x1 : U32)], [(128 .|. x0 : U32)]], [[(240 .|. (c >> 18n) : U32)], [(128 .|. x2 : U32)], [(128 .|. x1 : U32)], [(128 .|. x0 : U32)]])))
+
+# A set of code points as byte sets: one code point by its UTF-8 bytes, ASCII points as one set.
+# U+FFFD also matches an invalid byte, so it has no bytes to require.
+def set.bytes(+p: List<&2, U32>) -> Maybe<&2, List<&2, List<&2, U32>>>:
+  match p:
+    case Con{+c, Nil{}}:
+      Bool.pick(Maybe<&2, List<&2, List<&2, U32>>>, U32.is_eq(c, 65533), None{}, Some{u8(c)})
+    case _:
+      Bool.pick(Maybe<&2, List<&2, List<&2, U32>>>, pts.ascii(p), Some{[p]}, None{})
+
+# The most bytes a char of the set takes.
+def items.w(xs: List<&2, Item>, +acc: U32) -> U32:
+  match xs:
+    case Nil{}:
+      acc
+    case Con{Rng{lo, +hi}, t}:
+      items.w(t, U32.max(acc, u8w(hi)))
+    case Con{h, t}:
+      4
+
+def lt.lit(m: Maybe<&2, List<&2, List<&2, U32>>>, +w: U32) -> Lt:
+  match m:
+    case Some{+l}:
+      Lt{Some{l}, l, Some{U32.from_nat(List.length(&2, List<&2, U32>, l))}, None{}}
+    case None{}:
+      lt.none(w)
+
+def lt.small(m: Maybe<&2, List<&2, U32>>) -> Maybe<&2, List<&2, U32>>:
+  match m:
+    case Some{+p}:
+      Bool.pick(Maybe<&2, List<&2, U32>>, Nat.is_ge(4n, List.length(&2, U32, p)), Some{p}, None{})
+    case None{}:
+      None{}
+
+def lt.char(m: Maybe<&2, List<&2, U32>>) -> Maybe<&2, List<&2, List<&2, U32>>>:
+  match m:
+    case Some{p}:
+      Some{[p]}
+    case None{}:
+      None{}
+
+def lt.byte(m: Maybe<&2, List<&2, U32>>) -> Maybe<&2, List<&2, List<&2, U32>>>:
+  match m:
+    case Some{p}:
+      set.bytes(p)
+    case None{}:
+      None{}
+
+# A set of at most 4 single points is a literal of one char.
+def lt.set(neg: Bool, bytes: Bool, +items: List<&2, Item>) -> Lt:
+  match neg:
+    case True{}:
+      lt.none(Bool.pick(U32, bytes, 4, 1))
+    case False{}:
+      match bytes:
+        case True{}:
+          lt.lit(lt.byte(lt.small(set.pts(items, Nil{}))), items.w(items, 1))
+        case False{}:
+          lt.lit(lt.char(lt.small(set.pts(items, Nil{}))), 1)
+
+# A node's prefix is a Need at its start.
+def lt.fin(l: Lt) -> Lt:
+  match l:
+    case Lt{e, +p, m, c}:
+      Lt{e, p, m, need.best(c, need.pre(p))}
+
+def lt(n: Node, +bytes: Bool) -> Lt:
+  match n:
+    case NEmpty{}:
+      lt.zero()
+    case NSet{neg, items}:
+      lt.fin(lt.set(neg, bytes, items))
+    case NAssert{k}:
+      lt.zero()
+    case NCat{a, b}:
+      lt.fin(lt.cat(lt(a, bytes), lt(b, bytes)))
+    case NAlt{a, b}:
+      lt.alt(lt(a, bytes), lt(b, bytes))
+    case NPlus{g, a}:
+      lt.plus(lt(a, bytes))
+    case NQuest{g, a}:
+      lt.quest(lt(a, bytes))
+    case NGroup{i, a}:
+      lt(a, bytes)
+
+# The literals every match of n holds: over code points, or over bytes.
+def lt.cand(l: Lt) -> Maybe<&2, Need>:
+  match l:
+    case Lt{e, p, m, c}:
+      c
+
+def need.of(n: Node, +bytes: Bool) -> Maybe<&2, Need>:
+  lt.cand(lt(n, bytes))
+
+def pts.has(xs: List<&2, U32>, +c: U32) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case Con{+x, t}:
+      U32.is_eq(x, c) || pts.has(t, c)
+
+# Anchors
+# -------
+# A scan for a literal looks for its rarest set, its anchor, and checks the literal around each
+# place that holds it, so that a text full of a literal's first char does not stop the scan at
+# every char. rank: how common a unit is in text, from 0, the rarest, to 9. The ASCII ranks:
+#   0  control chars but \t \n \r, and DEL
+#   1  ! # $ % & + ; ? @ ^ ` | ~ Q X Z J
+#   2  K V Y W U B G H F O
+#   3  * < > q z j D L M P R C N T E A I S
+#   4  k v w b = { } [ ]
+#   5  f g y p 2-9 \ '
+#   6  c u m x 0 1 ( ) - / _
+#   7  d l h " , . : \t \r
+#   8  t a o i n s r \n
+#   9  e, space
+# rank.word(k) holds the ranks of bytes 8k to 8k+7, four bits each, byte 8k+j at bit 4j.
+def rank.word(k: U32) -> U32:
+  match k:
+    case 0:
+      0
+    case 1:
+      7342192
+    case 2:
+      0
+    case 3:
+      0
+    case 4:
+      1360074521
+    case 5:
+      1734808422
+    case 6:
+      1431655782
+    case 7:
+      323163989
+    case 8:
+      573780529
+    case 9:
+      590553394
+    case 10:
+      572732179
+    case 11:
+      1631928609
+    case 12:
+      1435985025
+    case 13:
+      2288468871
+    case 14:
+      1147701301
+    case _:
+      21054294
+
+# Past ASCII: over Bytes a continuation byte 5, a lead byte 4, and a byte no UTF-8 text holds 0;
+# over a String, a code point 4.
+def rank.hi(+bytes: Bool, +c: U32) -> U32:
+  Bool.pick(U32, bytes, Bool.pick(U32, U32.is_lt(c, 192), 5, Bool.pick(U32, U32.is_le(194, c) && U32.is_le(c, 244), 4, 0)), 4)
+
+def rank(+bytes: Bool, +c: U32) -> U32:
+  Bool.pick(U32, U32.is_lt(c, 128), (U32.shrn(rank.word((c >> 3n : U32)), U32.to_nat(((c .&. 7) * 4 : U32))) .&. 15 : U32), rank.hi(bytes, c))
+
+# The rank of a set: that of its most common member, or acc.
+def set.rank(xs: List<&2, U32>, +bytes: Bool, +acc: U32) -> U32:
+  match xs:
+    case Nil{}:
+      acc
+    case Con{+x, t}:
+      set.rank(t, bytes, U32.max(acc, rank(bytes, x)))
+
+# A literal of a Need with its anchor: off, the anchor's place in the literal; set, the anchor;
+# lit, the literal; tail, the literal from the anchor on.
+type Anc is Data:
+  Anc{off: U32, set: List<&2, U32>, lit: List<&2, List<&2, U32>>, tail: List<&2, List<&2, U32>>}
+
+# The place and the set of l's rarest set, the first of them on a tie: i is the place of l's head,
+# and at, rk and best the place, rank and set of the rarest before it.
+def lit.anchor(l: List<&2, List<&2, U32>>, +bytes: Bool, +i: U32, +at: U32, +rk: U32, best: List<&2, U32>) -> U32 & List<&2, U32>:
+  match l:
+    case Nil{}:
+      (at, best)
+    case Con{+set, t}:
+      +r = set.rank(set, bytes, 0)
+      +take = U32.is_lt(r, rk)
+      lit.anchor(t, bytes, (i + 1 : U32), Bool.pick(U32, take, i, at), Bool.pick(U32, take, r, rk), Bool.pick(List<&2, U32>, take, set, best))
+
+def anc.of(r: U32 & List<&2, U32>, +l: List<&2, List<&2, U32>>) -> Anc:
+  (+o, set) = r
+  Anc{o, set, l, List.drop(&2, List<&2, U32>, l, U32.to_nat(o))}
+
+def lit.anc(+l: List<&2, List<&2, U32>>, +bytes: Bool) -> Anc:
+  anc.of(lit.anchor(l, bytes, 0, 0, 10, Nil{}), l)
+
+# The literals with their anchors, over bytes or code points.
+def lits.ancs(ls: List<&2, List<&2, List<&2, U32>>>, +bytes: Bool) -> List<&2, Anc>:
+  match ls:
+    case Nil{}:
+      Nil{}
+    case Con{l, t}:
+      lit.anc(l, bytes) <> lits.ancs(t, bytes)
+
+# The anchors of xs, added to acc.
+def ancs.sets(xs: List<&2, Anc>, acc: List<&2, U32>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      acc
+    case Con{Anc{o, set, l, tail}, t}:
+      ancs.sets(t, List.append(&2, U32, set, acc))
+
+# The largest anchor place of xs, or acc. A literal found with its anchor at p starts at p - off;
+# one that starts earlier has its anchor at p or later, so it starts at p - big or later.
+def ancs.big(xs: List<&2, Anc>, +acc: U32) -> U32:
+  match xs:
+    case Nil{}:
+      acc
+    case Con{Anc{+o, set, l, tail}, t}:
+      ancs.big(t, U32.max(acc, o))
+
+# Whether s starts with the literal l.
+def lit.at(l: List<&2, List<&2, U32>>, s: String) -> Bool:
+  match l:
+    case Nil{}:
+      True{}
+    case Con{set, rest}:
+      match s:
+        case SNil{}:
+          False{}
+        case SCon{Chr{+c}, t}:
+          pts.has(set, c) && lit.at(rest, t)
+
+# Whether the text c, then t, starts with the literal l.
+def lit.at.c(l: List<&2, List<&2, U32>>, +c: U32, t: String) -> Bool:
+  match l:
+    case Nil{}:
+      True{}
+    case Con{set, rest}:
+      pts.has(set, c) && lit.at(rest, t)
+
+# Whether a literal of ls starts the text c, then t.
+def lits.any(ls: List<&2, List<&2, List<&2, U32>>>, +c: U32, +t: String) -> Bool:
+  match ls:
+    case Nil{}:
+      False{}
+    case Con{l, r}:
+      lit.at.c(l, c, t) || lits.any(r, c, t)
+
+# The anchors as a table of ASCII bytes: the ASCII members of xs added to a.
+def lits.asc(xs: List<&2, U32>, a: Asc) -> Asc:
+  match xs:
+    case Nil{}:
+      a
+    case Con{+x, t}:
+      lits.asc(t, asc.bit(U32.is_lt(x, 128), x, a))
+
+# Whether c is an anchor place: by the table m when ASCII, else among first.
+def fst.has(+c: U32, +m: Asc, +first: List<&2, U32>) -> Bool:
+  asc.has(c, m) && (U32.is_lt(c, 128) || pts.has(first, c))
+
+# Whether s's head is an anchor place; the end of the text is not.
+def fst.head(s: String, +m: Asc, +first: List<&2, U32>) -> Bool:
+  match s:
+    case SNil{}:
+      False{}
+    case SCon{Chr{+c}, t}:
+      fst.has(c, m, first)
+
+# Whether a literal of ls starts at s's head.
+def lits.here(s: String, +ls: List<&2, List<&2, List<&2, U32>>>) -> Bool:
+  match s:
+    case SNil{}:
+      False{}
+    case SCon{Chr{+c}, +t}:
+      lits.any(ls, c, t)
+
+# s from its first char at an anchor place on, or empty; hit: whether s's head is one. fuel: each
+# round passes a char. s is returned only before it is taken apart, so the loop reads it in place.
+def lits.pass(fuel: Nat, hit: Bool, +s: String, +m: Asc, +first: List<&2, U32>) -> String:
+  match fuel:
+    case 0n:
+      match hit:
+        case True{}:
+          s
+        case False{}:
+          s
+    case 1n+f:
+      match hit:
+        case True{}:
+          s
+        case False{}:
+          match s:
+            case SNil{}:
+              SNil{}
+            case SCon{h, +t}:
+              lits.pass(f, fst.head(t, m, first), t, m, first)
+
+# With every anchor at the head of its literal: s from the first literal of ls on, or empty when it
+# holds none: s starts at an anchor place, or is empty, and ok: whether a literal starts at its
+# head. fuel: each round passes a char.
+def lits.find(fuel: Nat, ok: Bool, +s: String, +m: Asc, +first: List<&2, U32>, +ls: List<&2, List<&2, List<&2, U32>>>) -> String:
+  match fuel:
+    case 0n:
+      SNil{}
+    case 1n++f:
+      match ok:
+        case True{}:
+          s
+        case False{}:
+          match s:
+            case SNil{}:
+              SNil{}
+            case SCon{h, +t}:
+              +r = lits.pass(f, fst.head(t, m, first), t, m, first)
+              lits.find(f, lits.here(r, ls), r, m, first, ls)
+
+# As lits.pass, counting: s from its first char at an anchor place on, and that char's offset, i
+# being s's.
+def lits.passn(fuel: Nat, hit: Bool, +s: String, +i: U32, +m: Asc, +first: List<&2, U32>) -> String & U32:
+  match fuel:
+    case 0n:
+      match hit:
+        case True{}:
+          (s, i)
+        case False{}:
+          (s, i)
+    case 1n+f:
+      match hit:
+        case True{}:
+          (s, i)
+        case False{}:
+          match s:
+            case SNil{}:
+              (SNil{}, i)
+            case SCon{h, +t}:
+              lits.passn(f, fst.head(t, m, first), t, (i + 1 : U32), m, first)
+
+def anc.tail.if(fits: Bool, tail: List<&2, List<&2, U32>>, +t: String) -> Bool:
+  match fits:
+    case True{}:
+      lit.at(tail, t)
+    case False{}:
+      False{}
+
+# Whether x's anchor is at offset p, as far as the text from p on, t, shows: the literal fits
+# before p, and its tail starts t.
+def anc.tail(x: Anc, +t: String, +p: U32) -> Bool:
+  Anc{+o, set, l, tail} = x
+  anc.tail.if(U32.is_le(o, p), tail, t)
+
+def ancs.tail(xs: List<&2, Anc>, +t: String, +p: U32) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case Con{x, r}:
+      anc.tail(x, t, p) || ancs.tail(r, t, p)
+
+def anc.full.if(fits: Bool, l: List<&2, List<&2, U32>>, +b: String, +n: U32) -> Bool:
+  match fits:
+    case True{}:
+      lit.at(l, String.drop(b, U32.to_nat(n)))
+    case False{}:
+      False{}
+
+# Whether x's literal starts at offset p - off, b being the text from bp on, bp <= p - off.
+def anc.full(x: Anc, +b: String, +bp: U32, +p: U32) -> Bool:
+  Anc{+o, set, l, tail} = x
+  anc.full.if(U32.is_le(o, p), l, b, (p - o - bp : U32))
+
+def ancs.full(xs: List<&2, Anc>, +b: String, +bp: U32, +p: U32) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case Con{x, r}:
+      anc.full(x, b, bp, p) || ancs.full(r, b, bp, p)
+
+# A round of lits.seek: done, with the text it gives; or go on at t, the text from the anchor place
+# p on, with b, the text from bp on.
+type Sg is Data:
+  SkDone{r: String}
+  SkGo{t: String, p: U32, b: String, bp: U32}
+
+def seek.go(r: String & U32, +b: String, +bp: U32) -> Sg:
+  (+t, +p) = r
+  SkGo{t, p, b, bp}
+
+# On from the anchor place after p, rest being the text after it.
+def seek.next(f: Nat, +rest: String, +p: U32, +b: String, +bp: U32, +m: Asc, +first: List<&2, U32>) -> Sg:
+  seek.go(lits.passn(f, fst.head(rest, m, first), rest, (p + 1 : U32), m, first), b, bp)
+
+# ok: whether a literal has its anchor at p; b: the text from bp on.
+def seek.full(ok: Bool, f: Nat, +rest: String, +p: U32, +b: String, +bp: U32, +m: Asc, +first: List<&2, U32>) -> Sg:
+  match ok:
+    case True{}:
+      SkDone{b}
+    case False{}:
+      seek.next(f, rest, p, b, bp, m, first)
+
+# ok: whether a tail starts at the anchor place p. Only then does b move up, to p - big, and the
+# literals are checked whole.
+def seek.cand(ok: Bool, f: Nat, +rest: String, +p: U32, +b: String, +bp: U32, +m: Asc, +first: List<&2, U32>, +xs: List<&2, Anc>, +big: U32) -> Sg:
+  match ok:
+    case False{}:
+      seek.next(f, rest, p, b, bp, m, first)
+    case True{}:
+      +tp = Bool.pick(U32, U32.is_le(big, p), (p - big : U32), 0)
+      +b2 = String.drop(b, U32.to_nat((tp - bp : U32)))
+      seek.full(ancs.full(xs, b2, tp, p), f, rest, p, b2, tp, m, first)
+
+def seek.step(f: Nat, +t: String, +p: U32, +b: String, +bp: U32, +m: Asc, +first: List<&2, U32>, +xs: List<&2, Anc>, +big: U32) -> Sg:
+  match t:
+    case SNil{}:
+      SkDone{SNil{}}
+    case SCon{h, +rest}:
+      seek.cand(ancs.tail(xs, t, p), f, rest, p, b, bp, m, first, xs, big)
+
+# The text from p - big on, or from 0 when p < big, p being the first anchor place where a literal
+# of xs holds; empty when the text holds none. Each SkGo holds bp <= p - big for every anchor place
+# p still to come. fuel: each round passes a char.
+def lits.seek(fuel: Nat, st: Sg, +m: Asc, +first: List<&2, U32>, +xs: List<&2, Anc>, +big: U32) -> String:
+  match fuel:
+    case 0n:
+      SNil{}
+    case 1n++f:
+      match st:
+        case SkDone{r}:
+          r
+        case SkGo{+t, +p, +b, +bp}:
+          lits.seek(f, seek.step(f, t, p, b, bp, m, first, xs, big), m, first, xs, big)
+
+# zero: whether every anchor heads its literal (big, the largest anchor place, is 0); then the
+# literals are tested at each anchor place as they are, ls.
+def lits.find.by(zero: Bool, +big: U32, +fuel: Nat, +s: String, +m: Asc, +first: List<&2, U32>, +xs: List<&2, Anc>, +ls: List<&2, List<&2, List<&2, U32>>>) -> String:
+  match zero:
+    case True{}:
+      +r = lits.pass(fuel, fst.head(s, m, first), s, m, first)
+      lits.find(fuel, lits.here(r, ls), r, m, first, ls)
+    case False{}:
+      lits.seek(Nat.add(fuel, 1n), seek.go(lits.passn(fuel, fst.head(s, m, first), s, 0, m, first), s, 0), m, first, xs, big)
+
+# s from where a match may start on: from p - big, p being the first anchor place where a literal
+# of xs holds, or from 0 when p < big; empty when s holds none. A literal is never empty, so a found
+# one leaves a text that is not.
+def lits.find.start(+s: String, +ls: List<&2, List<&2, List<&2, U32>>>) -> String:
+  +xs = lits.ancs(ls, False{})
+  +first = ancs.sets(xs, Nil{})
+  +m = lits.asc(first, Asc{0, 0, 0, 0})
+  +fuel = Nat.add(String.length(s), 1n)
+  +big = ancs.big(xs, 0)
+  lits.find.by(U32.is_eq(big, 0), big, fuel, s, m, first, xs, ls)
+
+# Where a match may start: None when no literal occurs, so there is no match; else the first
+# occurrence h less far, or 0 when far is unbounded or reaches past the start.
+def need.from(h: Maybe<&2, U32>, far: Maybe<&2, U32>) -> Maybe<&2, U32>:
+  match h:
+    case None{}:
+      None{}
+    case Some{+k}:
+      match far:
+        case None{}:
+          Some{0}
+        case Some{+d}:
+          Some{Bool.pick(U32, U32.is_le(d, k), (k - d : U32), 0)}
+
+# Whether every match starts at its literal.
+def need.zero(far: Maybe<&2, U32>) -> Bool:
+  match far:
+    case None{}:
+      False{}
+    case Some{+d}:
+      U32.is_eq(d, 0)
+
+# Whether a String search uses its Need: when every match starts at its literal and no word
+# boundary reads the char before one, so the automata start at the first literal, or at most the
+# largest anchor place before it, with nothing to look up. Else a found literal would leave the
+# automata the whole text from its start, or a walk back to the char before it, on top of the scan.
+def need.gate(m: Maybe<&2, Need>, +plain: Bool) -> Bool:
+  match m:
+    case None{}:
+      False{}
+    case Some{Need{ls, far}}:
+      need.zero(far) && plain
+
 # prog: the instructions by pc; fuel: enough steps for one closure; slots: two per group, group 0 included;
 # start: the sets one of which the first char of a match is in, or None when a match may start anywhere;
 # bits: the bit-parallel form, for programs of at most 32 instructions without word boundaries;
 # lead: as start, but past assertions, as if they held: a char outside it starts no match, though
 # one inside may still fail an assertion; asc: lead as a table of ASCII bytes, for skipping;
-# plain: no word boundary.
+# plain: no word boundary; need, needb: the literals every match holds, over a String and over Bytes;
+# gate: whether a String search uses need, as need.gate.
 
 def rev.build(m: Maybe<&2, Node>) -> Maybe<&2, Bits>:
   match m:
@@ -1101,14 +1745,16 @@ def rev.if(ok: Bool, node: Node) -> Maybe<&2, Bits>:
       rev.build(required.prefix(node))
 
 type Regex is Data:
-  Regex{prog: Trie<Inst>, fuel: Nat, slots: Nat, start: Maybe<&2, List<&2, Inst>>, lead: Maybe<&2, List<&2, Inst>>, bits: Maybe<&2, Bits>, asc: Maybe<&2, Asc>, plain: Bool, must: Maybe<&2, U32>, reverse: Maybe<&2, Bits>}
+  Regex{prog: Trie<Inst>, fuel: Nat, slots: Nat, start: Maybe<&2, List<&2, Inst>>, lead: Maybe<&2, List<&2, Inst>>, bits: Maybe<&2, Bits>, asc: Maybe<&2, Asc>, plain: Bool, must: Maybe<&2, U32>, reverse: Maybe<&2, Bits>, need: Maybe<&2, Need>, needb: Maybe<&2, Need>, gate: Bool}
 
 def build(+node: Node, +n: U32) -> Regex:
   +insts = {ISave{0} <> emit(node, 1, [ISave{1}, IMatch{}]) : List<&2, Inst>}
   +fuel = Nat.add(Nat.mul(3n, List.length(&2, Inst, insts)), 2n)
   +start = first(fuel, False{}, insts, Fs{[0], Nil{}, Nil{}})
   +lead = first(fuel, True{}, insts, Fs{[0], Nil{}, Nil{}})
-  Regex{trie.from(Inst, insts, 0, TTip{}), fuel, U32.to_nat((2 * n : U32)), start, lead, bits(fuel, insts), asc(lead), bits.plain(insts), required(node), rev.if(reverse.ok(node), node)}
+  +plain = bits.plain(insts)
+  +need = need.of(node, False{})
+  Regex{trie.from(Inst, insts, 0, TTip{}), fuel, U32.to_nat((2 * n : U32)), start, lead, bits(fuel, insts), asc(lead), plain, required(node), rev.if(reverse.ok(node), node), need, need.of(node, True{}), need.gate(need, plain)}
 
 def compile.fin(st: Ps) -> Maybe<&2, Regex>:
   match st:
@@ -1844,15 +2490,53 @@ def find.spans(m: Maybe<&2, List<&2, Maybe<&2, U32>>>) -> Maybe<&2, List<&2, May
     case Some{caps}:
       Some{spans(caps)}
 
-# slots: capture slots to keep; is_match keeps none, so each ISave is free.
-def exec(re: Regex, +s: String, +any: Bool) -> Maybe<&2, List<&2, Maybe<&2, U32>>>:
-  Regex{+prog, +fuel, +slots, +start, +lead, bits, +asc, +plain, must, reverse} = re
+def str.code(m: Maybe<&2, Char>) -> U32:
+  match m:
+    case None{}:
+      0
+    case Some{Chr{+c}}:
+      c
+
+# The DFA, then the Pike VM, from position k of s: no match starts before k, and r is s from k.
+# Past the start only a program without word boundaries comes here, so the DFA's first state is
+# idle of kind 1, whatever the char before k. slots: capture slots to keep; is_match keeps none,
+# so each ISave is free.
+def exec.at(+k: U32, +r: String, +s: String, +any: Bool, +prog: Trie<Inst>, +fuel: Nat, +slots: Nat, +start: Maybe<&2, List<&2, Inst>>, +lead: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +plain: Bool) -> Maybe<&2, List<&2, Maybe<&2, U32>>>:
   +init = List.replicate(Maybe<&2, U32>, Bool.pick(Nat, any, 0n, slots), None{})
-  +len = String.length(s)
-  +total = U32.from_nat(len)
-  +cap = dk.cap(total)
+  +total = U32.from_nat(String.length(s))
+  +rest = (total - k : U32)
+  +zero = U32.is_eq(k, 0)
+  +wb = Bool.not(plain)
+  +id = Bool.pick(U32, zero, 0, 1)
+  +cap = dk.cap(rest)
   +sk = dk.sk(lead, asc)
-  exec.dr(dfas(Nat.add(Nat.mul(3n, len), 8n), Bool.pick(U32, sk, 1, 0), Dz0{}, s, Array.get(U32, Array.new(U32, dk.tab(total), 0), str.head(s)), dk.sts(dk.depth(total)), dk.keys(cap), 3, 0, 0, dk.none(), 0, prog, fuel, Bool.not(plain), lead, asc, asc.or(asc), lead.sets(lead), sk, cap), any, s, total, prog, fuel, init, start, lead, asc)
+  exec.dr(dfas(Nat.add(Nat.mul(3n, U32.to_nat(rest)), 8n), Bool.pick(U32, sk, 1, 0), Dz0{}, r, Array.get(U32, Array.new(U32, dk.tab(rest), 0), ((id * 128) + str.head(r) : U32)), dk.sts(dk.depth(rest)), dk.keys(cap), 3, k, id, dk.none(), k, prog, fuel, wb, lead, asc, asc.or(asc), lead.sets(lead), sk, cap), any, s, total, prog, fuel, init, start, lead, asc)
+
+# found: whether s holds a literal, r being s from the first, where the automata start.
+def exec.lit(found: Bool, +r: String, +s: String, +any: Bool, +prog: Trie<Inst>, +fuel: Nat, +slots: Nat, +start: Maybe<&2, List<&2, Inst>>, +lead: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +plain: Bool) -> Maybe<&2, List<&2, Maybe<&2, U32>>>:
+  match found:
+    case False{}:
+      None{}
+    case True{}:
+      exec.at((U32.from_nat(String.length(s)) - U32.from_nat(String.length(r)) : U32), r, s, any, prog, fuel, slots, start, lead, asc, plain)
+
+def exec.need(m: Maybe<&2, Need>, +s: String, +any: Bool, +prog: Trie<Inst>, +fuel: Nat, +slots: Nat, +start: Maybe<&2, List<&2, Inst>>, +lead: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +plain: Bool) -> Maybe<&2, List<&2, Maybe<&2, U32>>>:
+  match m:
+    case None{}:
+      exec.at(0, s, s, any, prog, fuel, slots, start, lead, asc, plain)
+    case Some{Need{ls, far}}:
+      +r = lits.find.start(s, ls)
+      exec.lit(Nat.is_ge(String.length(r), 1n), r, s, any, prog, fuel, slots, start, lead, asc, plain)
+
+# The Need a String search uses: none without gate.
+def need.used(m: Maybe<&2, Need>, gate: Bool) -> Maybe<&2, Need>:
+  Bool.pick(Maybe<&2, Need>, gate, m, None{})
+
+# With gate, a text without a required literal has no match, and no automaton runs; else the
+# automata start at the first literal.
+def exec(re: Regex, +s: String, +any: Bool) -> Maybe<&2, List<&2, Maybe<&2, U32>>>:
+  Regex{+prog, +fuel, +slots, +start, +lead, bits, +asc, +plain, must, reverse, need, needb, gate} = re
+  exec.need(need.used(need, gate), s, any, prog, fuel, slots, start, lead, asc, plain)
 
 # The leftmost match in s: the span of group 0, then of each group; None for a group that did not take part.
 def find(re: Regex, +s: String) -> Maybe<&2, List<&2, Maybe<&2, Span>>>:
@@ -1920,18 +2604,36 @@ def bits.run(s: String, +sets: List<&2, Bit>, +start: Maybe<&2, List<&2, Inst>>,
         case Bs{+cur, False{}, ok}:
           bits.run(t, sets, start, atn, hit1, bits.go(bits.idle(start, cur, atn, c), sets, atn, hit1, cur, c))
 
-def bits.is_match(b: Bits, start: Maybe<&2, List<&2, Inst>>, s: String) -> Bool:
-  Bits{sets, at0, hit0, hit01, atn, hit1} = b
-  bits.run(s, sets, start, atn, hit1, Bs{at0, hit0, hit01})
+# From position k of s, no match starting before k: a fresh state past the start, as an idle step leaves.
+def bits.is_match(b: Bits, start: Maybe<&2, List<&2, Inst>>, +k: U32, r: String) -> Bool:
+  Bits{sets, +at0, +hit0, +hit01, +atn, +hit1} = b
+  +zero = U32.is_eq(k, 0)
+  bits.run(r, sets, start, atn, hit1, Bs{Bool.pick(U32, zero, at0, atn), Bool.pick(Bool, zero, hit0, False{}), Bool.pick(Bool, zero, hit01, hit1)})
+
+# As exec.lit.
+def bits.lit(found: Bool, +r: String, +s: String, b: Bits, start: Maybe<&2, List<&2, Inst>>) -> Bool:
+  match found:
+    case False{}:
+      False{}
+    case True{}:
+      bits.is_match(b, start, (U32.from_nat(String.length(s)) - U32.from_nat(String.length(r)) : U32), r)
+
+def bits.need(m: Maybe<&2, Need>, +s: String, b: Bits, start: Maybe<&2, List<&2, Inst>>) -> Bool:
+  match m:
+    case None{}:
+      bits.is_match(b, start, 0, s)
+    case Some{Need{ls, far}}:
+      +r = lits.find.start(s, ls)
+      bits.lit(Nat.is_ge(String.length(r), 1n), r, s, b, start)
 
 # The bit NFA form of is_match, or None when the program is too large or has a word boundary.
-def is_match.bits(re: Regex, s: String) -> Maybe<&2, Bool>:
-  Regex{prog, fuel, slots, start, lead, bits, asc, plain, must, reverse} = re
+def is_match.bits(re: Regex, +s: String) -> Maybe<&2, Bool>:
+  Regex{prog, fuel, slots, start, lead, bits, asc, plain, must, reverse, need, needb, gate} = re
   match bits:
     case None{}:
       None{}
     case Some{b}:
-      Some{bits.is_match(b, start, s)}
+      Some{bits.need(need.used(need, gate), s, b, start)}
 
 def is_match.pick(m: Maybe<&2, Bool>, re: Regex, +s: String) -> Bool:
   match m:
@@ -2862,9 +3564,190 @@ def exec.bytes.dr(r: Array<U32> & Dr, +len: U32, +plain: Bool, +prog: Trie<Inst>
     case DFull{+p}:
       exec.bytes.go(plain, len, p, a, prog, fuel, init, start, asc, any, slots)
 
-def exec.bytes.run(b: Bytes.Bytes, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +lead: Maybe<&2, List<&2, Inst>>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
+# The DFA, then the Pike VM, from byte k, a char boundary: no match starts before k.
+def exec.bytes.from(b: Bytes.Bytes, +k: U32, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +lead: Maybe<&2, List<&2, Inst>>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
   Bytes.Bytes{+len, buf} = b
-  exec.bytes.fin(len, exec.bytes.dr(dfab.init(Bytes.peek(buf, 4294967295), len, 0, prog, fuel, Bool.not(plain), asc, lead), len, plain, prog, fuel, init, start, asc, any, slots))
+  exec.bytes.fin(len, exec.bytes.dr(dfab.init(Bytes.peek(buf, (k - 1 : U32)), len, k, prog, fuel, Bool.not(plain), asc, lead), len, plain, prog, fuel, init, start, asc, any, slots))
+
+def exec.bytes.run(b: Bytes.Bytes, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +lead: Maybe<&2, List<&2, Inst>>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
+  exec.bytes.from(b, 0, plain, prog, fuel, init, start, asc, lead, any, slots)
+
+# Required literals over Bytes
+# ----------------------------
+
+# Whether the bytes from k spell the literal l; ok: whether those before k did; r: byte k.
+def blit.go(l: List<&2, List<&2, U32>>, ok: Bool, r: Array<U32> & U32, +len: U32, +k: U32) -> Array<U32> & Bool:
+  match l:
+    case Nil{}:
+      (a, v) = r
+      (a, ok)
+    case Con{set, t}:
+      match ok:
+        case False{}:
+          (a, v) = r
+          (a, False{})
+        case True{}:
+          (a, +v) = r
+          blit.go(t, U32.is_lt(k, len) && pts.has(set, v), pk(a, len, (k + 1 : U32)), len, (k + 1 : U32))
+
+# Whether the literal l starts at byte j, when it fits before the anchor place.
+def banc.at(fits: Bool, l: List<&2, List<&2, U32>>, a: Array<U32>, +len: U32, +j: U32) -> Array<U32> & Bool:
+  match fits:
+    case True{}:
+      blit.go(l, True{}, pk(a, len, j), len, j)
+    case False{}:
+      (a, False{})
+
+def blits.step(ok: Bool, x: Anc, a: Array<U32>, +len: U32, +k: U32) -> Array<U32> & Bool:
+  match ok:
+    case True{}:
+      (a, True{})
+    case False{}:
+      Anc{+o, set, l, tail} = x
+      banc.at(U32.is_le(o, k), l, a, len, (k - o : U32))
+
+# Whether a literal of xs has its anchor at byte k; r holds whether one already did.
+def blits.go(xs: List<&2, Anc>, r: Array<U32> & Bool, +len: U32, +k: U32) -> Array<U32> & Bool:
+  match xs:
+    case Nil{}:
+      r
+    case Con{l, t}:
+      (a, ok) = r
+      blits.go(t, blits.step(ok, l, a, len, k), len, k)
+
+def blits.u(r: Array<U32> & Bool) -> Array<U32> & U32:
+  (a, ok) = r
+  (a, Bool.pick(U32, ok, 1, 0))
+
+# The top bit of each byte of w that equals a byte of xs is set in the result. A false mark can
+# follow a true one in the same word, never stand alone.
+def swar.has(xs: List<&2, U32>, +w: U32, +acc: U32) -> U32:
+  match xs:
+    case Nil{}:
+      acc
+    case Con{+b, t}:
+      +x = U32.xor(w, (b * 16843009 : U32))
+      swar.has(t, w, (acc .|. (((x - 16843009) .&. U32.not(x)) .&. 2155905152) : U32))
+
+def wprobe.of(+first: List<&2, U32>, r: Array<U32> & U32) -> Array<U32> & Bool:
+  (a, +w) = r
+  (a, U32.is_ne(swar.has(first, w, 0), 0))
+
+# Whether word wi has a byte in first; past nw counts as one, so a skip stops there.
+def wprobe.if(ok: Bool, a: Array<U32>, +wi: U32, +first: List<&2, U32>) -> Array<U32> & Bool:
+  match ok:
+    case True{}:
+      wprobe.of(first, Array.get(U32, a, wi))
+    case False{}:
+      (a, True{})
+
+def wprobe(a: Array<U32>, +wi: U32, +nw: U32, +first: List<&2, U32>) -> Array<U32> & Bool:
+  wprobe.if(U32.is_lt(wi, nw), a, wi, first)
+
+# The first word at or after wi with a byte in first, or nw; r holds the probe of wi.
+def wskip(fuel: Nat, r: Array<U32> & Bool, +wi: U32, +nw: U32, +first: List<&2, U32>) -> Array<U32> & U32:
+  match fuel:
+    case 0n:
+      (a, h) = r
+      (a, wi)
+    case 1n+f:
+      (a, hit) = r
+      match hit:
+        case True{}:
+          (a, wi)
+        case False{}:
+          wskip(f, wprobe(a, (wi + 1 : U32), nw, first), (wi + 1 : U32), nw, first)
+
+# The first byte offset that is the anchor place of a literal of ls, a word of four bytes at a
+# time; first: the anchors' bytes. ph: 0 skip the words from wi with no byte in first; 3 take the
+# word found, in r; 4 mark the bytes of word wi, in r, that are in first; 1 test the literals
+# around byte j of word wi when m marks it; 2 take that test, in r; 5 found at byte j of word wi;
+# 6 none. nw: the number of words. fuel: each word with a marked byte takes at most twelve rounds.
+def bfind(fuel: Nat, +ph: U32, r: Array<U32> & U32, +len: U32, +wi: U32, +j: U32, +m: U32, +first: List<&2, U32>, +ls: List<&2, Anc>, +nw: U32) -> Array<U32> & Maybe<&2, U32>:
+  match fuel:
+    case 0n:
+      (a, x) = r
+      (a, None{})
+    case 1n+f:
+      match ph:
+        case 0:
+          (a, x) = r
+          r2 = wskip(Nat.add(U32.to_nat((nw - wi : U32)), 1n), wprobe(a, wi, nw, first), wi, nw, first)
+          bfind(f, 3, r2, len, wi, j, m, first, ls, nw)
+        case 3:
+          (a, +w2) = r
+          r2 = Array.get(U32, a, w2)
+          bfind(f, Bool.pick(U32, U32.is_le(nw, w2), 6, 4), r2, len, w2, 0, m, first, ls, nw)
+        case 4:
+          (a, +w) = r
+          bfind(f, 1, (a, 0), len, wi, 0, swar.has(first, w, 0), first, ls, nw)
+        case 1:
+          (a, x) = r
+          +k = ((wi * 4) + j : U32)
+          +cand = U32.is_ne((U32.shrn(m, U32.to_nat(((j * 8) + 7 : U32))) .&. 1 : U32), 0)
+          r2 = blits.u(blits.go(Bool.pick(List<&2, Anc>, cand, ls, Nil{}), (a, False{}), len, k))
+          bfind(f, 2, r2, len, wi, j, m, first, ls, nw)
+        case 2:
+          (a, +ok) = r
+          +found = U32.is_eq(ok, 1)
+          +stay = found || U32.is_ne(j, 3)
+          +ph2 = Bool.pick(U32, found, 5, Bool.pick(U32, stay, 1, 0))
+          +wn = Bool.pick(U32, stay, wi, (wi + 1 : U32))
+          +j2 = Bool.pick(U32, found, j, Bool.pick(U32, stay, (j + 1 : U32), 0))
+          bfind(f, ph2, (a, 0), len, wn, j2, m, first, ls, nw)
+        case 5:
+          (a, x) = r
+          (a, Some{((wi * 4) + j : U32)})
+        case _:
+          (a, x) = r
+          (a, None{})
+
+def bfind.start(a: Array<U32>, +len: U32, +xs: List<&2, Anc>) -> Array<U32> & Maybe<&2, U32>:
+  +nw = ((len + 3) >> 2n : U32)
+  bfind(Nat.add(Nat.mul(12n, U32.to_nat(nw)), 8n), 0, (a, 0), len, 0, 0, 0, ancs.sets(xs, Nil{}), xs, nw)
+
+# The last char boundary at or before k, from the bytes k, k-1, k-2, k-3: a byte that is no
+# continuation byte starts a char, and no char spans more than four bytes.
+def bk.pick(+k: U32, +b0: U32, +b1: U32, +b2: U32, +b3: U32) -> U32:
+  Bool.pick(U32, Bool.not(cont(b0)), k, Bool.pick(U32, U32.is_eq(k, 0), 0, Bool.pick(U32, Bool.not(cont(b1)), (k - 1 : U32), Bool.pick(U32, U32.is_eq(k, 1), 0, Bool.pick(U32, Bool.not(cont(b2)), (k - 2 : U32), Bool.pick(U32, U32.is_eq(k, 2), 0, Bool.pick(U32, Bool.not(cont(b3)), (k - 3 : U32), k)))))))
+
+def bk.a3(+len: U32, +k: U32, +b0: U32, +b1: U32, +b2: U32, r: Array<U32> & U32) -> Bytes.Bytes & Maybe<&2, U32>:
+  (a, +b3) = r
+  (Bytes.Bytes{len, a}, Some{bk.pick(k, b0, b1, b2, b3)})
+
+def bk.a2(+len: U32, +k: U32, +b0: U32, +b1: U32, r: Array<U32> & U32) -> Bytes.Bytes & Maybe<&2, U32>:
+  (a, +b2) = r
+  bk.a3(len, k, b0, b1, b2, pk(a, len, (k - 3 : U32)))
+
+def bk.a1(+len: U32, +k: U32, +b0: U32, r: Array<U32> & U32) -> Bytes.Bytes & Maybe<&2, U32>:
+  (a, +b1) = r
+  bk.a2(len, k, b0, b1, pk(a, len, (k - 2 : U32)))
+
+def bk.a0(+len: U32, +k: U32, r: Array<U32> & U32) -> Bytes.Bytes & Maybe<&2, U32>:
+  (a, +b0) = r
+  bk.a1(len, k, b0, pk(a, len, (k - 1 : U32)))
+
+def need.fromb.k(m: Maybe<&2, U32>, a: Array<U32>, +len: U32) -> Bytes.Bytes & Maybe<&2, U32>:
+  match m:
+    case None{}:
+      (Bytes.Bytes{len, a}, None{})
+    case Some{+k}:
+      bk.a0(len, k, pk(a, len, k))
+
+def need.fromb(r: Array<U32> & Maybe<&2, U32>, far: Maybe<&2, U32>, +len: U32) -> Bytes.Bytes & Maybe<&2, U32>:
+  (a, h) = r
+  need.fromb.k(need.from(h, far), a, len)
+
+# The first byte a match may start at, a char boundary, or None when b has no match: the first
+# anchor place where a literal holds, less big and far.
+def need.atb(m: Maybe<&2, Need>, b: Bytes.Bytes) -> Bytes.Bytes & Maybe<&2, U32>:
+  match m:
+    case None{}:
+      (b, Some{0})
+    case Some{Need{ls, far}}:
+      Bytes.Bytes{+len, a} = b
+      +xs = lits.ancs(ls, True{})
+      need.fromb(bfind.start(a, len, xs), mx.add(Some{ancs.big(xs, 0)}, far), len)
 
 
 def rev.best(hit: Bool, +i: U32, prev: Maybe<&2, U32>) -> Maybe<&2, U32>:
@@ -3018,10 +3901,30 @@ def exec.bytes.must(m: Maybe<&2, U32>, rev: Maybe<&2, Bits>, b: Bytes.Bytes, +pl
     case Some{c}:
       exec.bytes.must.hit(b, rev, c, plain, prog, fuel, init, start, asc, lead, any, slots)
 
+# From byte 0 the required byte and the reverse scan apply as before; past it the DFA starts there.
+def exec.bytes.zero(zero: Bool, +k: U32, m: Maybe<&2, U32>, rev: Maybe<&2, Bits>, b: Bytes.Bytes, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +lead: Maybe<&2, List<&2, Inst>>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
+  match zero:
+    case True{}:
+      exec.bytes.must(m, rev, b, plain, prog, fuel, init, start, asc, lead, any, slots)
+    case False{}:
+      exec.bytes.from(b, k, plain, prog, fuel, init, start, asc, lead, any, slots)
+
+def exec.bytes.pick(k: Maybe<&2, U32>, m: Maybe<&2, U32>, rev: Maybe<&2, Bits>, b: Bytes.Bytes, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +lead: Maybe<&2, List<&2, Inst>>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
+  match k:
+    case None{}:
+      (b, None{})
+    case Some{+x}:
+      exec.bytes.zero(U32.is_eq(x, 0), x, m, rev, b, plain, prog, fuel, init, start, asc, lead, any, slots)
+
+def exec.bytes.need(r: Bytes.Bytes & Maybe<&2, U32>, m: Maybe<&2, U32>, rev: Maybe<&2, Bits>, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +lead: Maybe<&2, List<&2, Inst>>, +any: Bool, +slots: Nat) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
+  (b, k) = r
+  exec.bytes.pick(k, m, rev, b, plain, prog, fuel, init, start, asc, lead, any, slots)
+
+# A buffer without a required literal has no match, and no automaton runs.
 def exec.bytes(re: Regex, b: Bytes.Bytes, +any: Bool) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
-  Regex{+prog, +fuel, +slots, +start, +lead, bits, +asc, plain, must, reverse} = re
+  Regex{+prog, +fuel, +slots, +start, +lead, bits, +asc, plain, must, reverse, need, needb, gate} = re
   +sl = Bool.pick(Nat, any, 0n, slots)
-  exec.bytes.must(must, reverse, b, plain, prog, fuel, List.replicate(Maybe<&2, U32>, sl, None{}), start, asc, lead, any, sl)
+  exec.bytes.need(need.atb(needb, b), must, reverse, plain, prog, fuel, List.replicate(Maybe<&2, U32>, sl, None{}), start, asc, lead, any, sl)
 
 def find.bytes.fin(r: Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, Span>>>:
   (b, m) = r
@@ -3084,22 +3987,35 @@ def bits.bytes.fin(+len: U32, r: Array<U32> & Bool) -> Bytes.Bytes & Maybe<&2, B
   (a, x) = r
   (Bytes.Bytes{len, a}, Some{x})
 
-def bits.bytes(b: Bits, start: Maybe<&2, List<&2, Inst>>, asc: Maybe<&2, Asc>, +len: U32, buf: Array<U32>) -> Bytes.Bytes & Maybe<&2, Bool>:
-  Bits{sets, at0, hit0, hit01, atn, hit1} = b
-  bits.bytes.fin(len, bitsb(Nat.add(U32.to_nat(len), 2n), rt.at(dec(buf, len, 0), 0, Bs{at0, hit0, hit01}), len, sets, start, asc, atn, hit1))
+# From byte k, a char boundary, as bits.is_match from a position.
+def bits.bytes(b: Bits, start: Maybe<&2, List<&2, Inst>>, asc: Maybe<&2, Asc>, +len: U32, buf: Array<U32>, +k: U32) -> Bytes.Bytes & Maybe<&2, Bool>:
+  Bits{sets, +at0, +hit0, +hit01, +atn, +hit1} = b
+  +zero = U32.is_eq(k, 0)
+  bits.bytes.fin(len, bitsb(Nat.add(U32.to_nat((len - k : U32)), 2n), rt.at(dec(buf, len, k), k, Bs{Bool.pick(U32, zero, at0, atn), Bool.pick(Bool, zero, hit0, False{}), Bool.pick(Bool, zero, hit01, hit1)}), len, sets, start, asc, atn, hit1))
 
-def bits.bytes.if(m: Maybe<&2, Bits>, start: Maybe<&2, List<&2, Inst>>, asc: Maybe<&2, Asc>, b: Bytes.Bytes) -> Bytes.Bytes & Maybe<&2, Bool>:
+def bits.bytes.k(m: Maybe<&2, U32>, x: Bits, start: Maybe<&2, List<&2, Inst>>, asc: Maybe<&2, Asc>, b: Bytes.Bytes) -> Bytes.Bytes & Maybe<&2, Bool>:
+  match m:
+    case None{}:
+      (b, Some{False{}})
+    case Some{+k}:
+      Bytes.Bytes{+len, buf} = b
+      bits.bytes(x, start, asc, len, buf, k)
+
+def bits.bytes.at(r: Bytes.Bytes & Maybe<&2, U32>, x: Bits, start: Maybe<&2, List<&2, Inst>>, asc: Maybe<&2, Asc>) -> Bytes.Bytes & Maybe<&2, Bool>:
+  (b, m) = r
+  bits.bytes.k(m, x, start, asc, b)
+
+def bits.bytes.if(m: Maybe<&2, Bits>, need: Maybe<&2, Need>, start: Maybe<&2, List<&2, Inst>>, asc: Maybe<&2, Asc>, b: Bytes.Bytes) -> Bytes.Bytes & Maybe<&2, Bool>:
   match m:
     case None{}:
       (b, None{})
     case Some{x}:
-      Bytes.Bytes{+len, buf} = b
-      bits.bytes(x, start, asc, len, buf)
+      bits.bytes.at(need.atb(need, b), x, start, asc)
 
 # The bit NFA form of is_match over Bytes, or None when the program does not allow it.
 def is_match.bytes.bits(re: Regex, b: Bytes.Bytes) -> Bytes.Bytes & Maybe<&2, Bool>:
-  Regex{prog, fuel, slots, start, lead, bt, asc, plain, must, reverse} = re
-  bits.bytes.if(bt, start, asc, b)
+  Regex{prog, fuel, slots, start, lead, bt, asc, plain, must, reverse, need, needb, gate} = re
+  bits.bytes.if(bt, needb, start, asc, b)
 
 def is_match.bytes.pick(r: Bytes.Bytes & Maybe<&2, Bool>, re: Regex) -> Bytes.Bytes & Bool:
   (b, m) = r
