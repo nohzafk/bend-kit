@@ -17,7 +17,7 @@ Re.is_match.bytes(re, b)       # Bytes & Bool
 
 This package imports `bend-kit-bytes@0.3.3.0` and `bend-kit-unicode@0.1.0.0`. Import those versions for the byte buffer and Unicode APIs.
 
-With a `String`, positions count its code points, not octets. With `Bytes`, the matcher decodes UTF-8 as it goes and positions are byte offsets, as in RE2 and Go; an invalid byte matches as one U+FFFD. The `Bytes` path is the fast one: while no match is in progress it skips bytes that cannot start one. A group that did not take part in the match is `None`. The semantics are leftmost-first, as in RE2 and Perl: `a|ab` against `ab` matches `a`.
+With a `String`, positions count its code points, not octets. With `Bytes`, the matcher decodes UTF-8 as it goes and positions are byte offsets, as in RE2 and Go; an invalid byte matches as one U+FFFD. While no match is in progress, both paths skip chars that cannot start one, looking past leading assertions such as `\b` and `^`. The `Bytes` path is still the faster one. A group that did not take part in the match is `None`. The semantics are leftmost-first, as in RE2 and Perl: `a|ab` against `ab` matches `a`.
 
 ## Syntax
 

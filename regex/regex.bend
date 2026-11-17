@@ -816,13 +816,16 @@ def trie.from(-V: Data, xs: List<&2, V>, +k: U32, t: Trie<V>) -> Trie<V>:
       trie.from(V, r, (k + 1 : U32), trie.set(V, t, k, h))
 
 # The walk from pc 0 over the instructions that consume no char: the sets it reaches, or
-# FsAny when it reaches an assertion or a match, so that any char may start a match.
+# FsAny when it reaches a match, so that any char may start a match. thru: an assertion
+# passes on to the next pc, as if it held; else it ends the walk with FsAny too.
 type Fs is Data:
   Fs{stack: List<&2, U32>, seen: List<&2, U32>, sets: List<&2, Inst>}
   FsAny{}
 
-def first.inst(i: Maybe<&2, Inst>, +pc: U32, stack: List<&2, U32>, seen: List<&2, U32>, sets: List<&2, Inst>) -> Fs:
+def first.inst(thru: Bool, i: Maybe<&2, Inst>, +pc: U32, stack: List<&2, U32>, seen: List<&2, U32>, sets: List<&2, Inst>) -> Fs:
   match i:
+    case Some{IAssert{k}}:
+      Bool.pick(Fs, thru, Fs{(pc + 1 : U32) <> stack, seen, sets}, FsAny{})
     case Some{IJmp{x}}:
       Fs{x <> stack, seen, sets}
     case Some{ISplit{x, y}}:
@@ -834,15 +837,15 @@ def first.inst(i: Maybe<&2, Inst>, +pc: U32, stack: List<&2, U32>, seen: List<&2
     case _:
       FsAny{}
 
-def first.seen(hit: Bool, +prog: List<&2, Inst>, +pc: U32, stack: List<&2, U32>, seen: List<&2, U32>, sets: List<&2, Inst>) -> Fs:
+def first.seen(+thru: Bool, hit: Bool, +prog: List<&2, Inst>, +pc: U32, stack: List<&2, U32>, seen: List<&2, U32>, sets: List<&2, Inst>) -> Fs:
   match hit:
     case True{}:
       Fs{stack, seen, sets}
     case False{}:
-      first.inst(List.get(&2, Inst, prog, U32.to_nat(pc)), pc, stack, pc <> seen, sets)
+      first.inst(thru, List.get(&2, Inst, prog, U32.to_nat(pc)), pc, stack, pc <> seen, sets)
 
 # fuel: each pc expands once and pushes at most two pcs.
-def first(fuel: Nat, +prog: List<&2, Inst>, st: Fs) -> Maybe<&2, List<&2, Inst>>:
+def first(fuel: Nat, +thru: Bool, +prog: List<&2, Inst>, st: Fs) -> Maybe<&2, List<&2, Inst>>:
   match fuel:
     case 0n:
       None{}
@@ -853,7 +856,7 @@ def first(fuel: Nat, +prog: List<&2, Inst>, st: Fs) -> Maybe<&2, List<&2, Inst>>
         case Fs{Nil{}, seen, sets}:
           Some{sets}
         case Fs{Con{+pc, t}, +seen, sets}:
-          first(f, prog, first.seen(List.contains(~U32, ~U32.is_eq, seen, pc), prog, pc, t, seen, sets))
+          first(f, thru, prog, first.seen(thru, List.contains(~U32, ~U32.is_eq, seen, pc), prog, pc, t, seen, sets))
 
 # Bit-parallel NFA for is_match: bit pc stands for the set at pc, waiting on the next char.
 # The epsilon walk from a pc: the sets it reaches and whether it reaches the match, where at0
@@ -1055,10 +1058,31 @@ def asc(start: Maybe<&2, List<&2, Inst>>) -> Maybe<&2, Asc>:
     case Some{sets}:
       Some{asc.go(128n, 127, sets, Asc{0, 0, 0, 0})}
 
+def asc.word(k: U32, a: Asc) -> U32:
+  match k:
+    case 0:
+      Asc{m0, m1, m2, m3} = a
+      m0
+    case 1:
+      Asc{m0, m1, m2, m3} = a
+      m1
+    case 2:
+      Asc{m0, m1, m2, m3} = a
+      m2
+    case _:
+      Asc{m0, m1, m2, m3} = a
+      m3
+
+# Any non-ASCII byte may start a match: it may lead a char in start.
+def asc.has(+b: U32, a: Asc) -> Bool:
+  U32.is_le(128, b) || U32.is_ne((U32.shrn(asc.word((b >> 5n : U32), a), U32.to_nat((b .&. 31 : U32))) .&. 1 : U32), 0)
+
 # prog: the instructions by pc; fuel: enough steps for one closure; slots: two per group, group 0 included;
 # start: the sets one of which the first char of a match is in, or None when a match may start anywhere;
 # bits: the bit-parallel form, for programs of at most 32 instructions without word boundaries;
-# asc: start as a table of ASCII bytes, for skipping through Bytes; plain: no word boundary.
+# lead: as start, but past assertions, as if they held: a char outside it starts no match, though
+# one inside may still fail an assertion; asc: lead as a table of ASCII bytes, for skipping;
+# plain: no word boundary.
 
 def rev.build(m: Maybe<&2, Node>) -> Maybe<&2, Bits>:
   match m:
@@ -1077,13 +1101,14 @@ def rev.if(ok: Bool, node: Node) -> Maybe<&2, Bits>:
       rev.build(required.prefix(node))
 
 type Regex is Data:
-  Regex{prog: Trie<Inst>, fuel: Nat, slots: Nat, start: Maybe<&2, List<&2, Inst>>, bits: Maybe<&2, Bits>, asc: Maybe<&2, Asc>, plain: Bool, must: Maybe<&2, U32>, reverse: Maybe<&2, Bits>}
+  Regex{prog: Trie<Inst>, fuel: Nat, slots: Nat, start: Maybe<&2, List<&2, Inst>>, lead: Maybe<&2, List<&2, Inst>>, bits: Maybe<&2, Bits>, asc: Maybe<&2, Asc>, plain: Bool, must: Maybe<&2, U32>, reverse: Maybe<&2, Bits>}
 
 def build(+node: Node, +n: U32) -> Regex:
   +insts = {ISave{0} <> emit(node, 1, [ISave{1}, IMatch{}]) : List<&2, Inst>}
   +fuel = Nat.add(Nat.mul(3n, List.length(&2, Inst, insts)), 2n)
-  +start = first(fuel, insts, Fs{[0], Nil{}, Nil{}})
-  Regex{trie.from(Inst, insts, 0, TTip{}), fuel, U32.to_nat((2 * n : U32)), start, bits(fuel, insts), asc(start), bits.plain(insts), required(node), rev.if(reverse.ok(node), node)}
+  +start = first(fuel, False{}, insts, Fs{[0], Nil{}, Nil{}})
+  +lead = first(fuel, True{}, insts, Fs{[0], Nil{}, Nil{}})
+  Regex{trie.from(Inst, insts, 0, TTip{}), fuel, U32.to_nat((2 * n : U32)), start, lead, bits(fuel, insts), asc(lead), bits.plain(insts), required(node), rev.if(reverse.ok(node), node)}
 
 def compile.fin(st: Ps) -> Maybe<&2, Regex>:
   match st:
@@ -1291,19 +1316,89 @@ def run.end(sc: Sc) -> Maybe<&2, List<&2, Maybe<&2, U32>>>:
   Sc{items, best, stop} = sc
   best
 
-# pos: the position of s's head. Once a match exists and no thread is live, the rest of s cannot change it.
-def run(s: String, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +any: Bool, +pos: U32, st: Vm) -> Maybe<&2, List<&2, Maybe<&2, U32>>>:
+# Whether c is in lead: by the table for ASCII, by the sets past it.
+def lead.has(+c: U32, +m: Asc, +sets: List<&2, Inst>) -> Bool:
+  asc.has(c, m) && (U32.is_lt(c, 128) || starts(sets, c))
+
+# How many chars of an idle text to pass, and the char before the first one not passed.
+type Pass is Data:
+  Pass{n: U32, prev: U32}
+
+# Whether the head of s is in lead; the end of the text counts as in it, so a pass stops there.
+def head.in(s: String, +m: Asc, +sets: List<&2, Inst>) -> Bool:
   match s:
     case SNil{}:
-      Vm{ths, best} = st
-      run.end(scan(ths, prog, None{}, any, Sc{Nil{}, best, False{}}))
-    case SCon{+c, +t}:
-      match st:
-        case Vm{Nil{}, Some{b}}:
-          Some{b}
-        case Vm{ths, best}:
-          +p = (pos + 1 : U32)
-          run(t, prog, fuel, init, start, any, p, run.step(Vm{ths, best}, prog, fuel, init, start, any, p, c, String.get(t, 0n)))
+      True{}
+    case SCon{Chr{+c}, t}:
+      lead.has(c, m, sets)
+
+# Pass the chars of s outside lead; hit: whether s's head is in lead; n counts the chars
+# passed, prev is the last one passed.
+def skip.str(s: String, hit: Bool, +m: Asc, +sets: List<&2, Inst>, +n: U32, +prev: U32) -> Pass:
+  match s:
+    case SNil{}:
+      Bool.pick(Pass, hit, Pass{n, prev}, Pass{n, prev})
+    case SCon{Chr{+c}, +t}:
+      match hit:
+        case True{}:
+          Pass{n, prev}
+        case False{}:
+          skip.str(t, head.in(t, m, sets), m, sets, (n + 1 : U32), c)
+
+# Without lead every char may start a match, so none is passed.
+def skip.lead(lead: Maybe<&2, List<&2, Inst>>, asc: Maybe<&2, Asc>, +s: String, +c: Char) -> Pass:
+  match lead asc:
+    case Some{+sets} Some{+m}:
+      Chr{+x} = c
+      skip.str(s, head.in(s, m, sets), m, sets, 0, x)
+    case _ _:
+      Chr{+x} = c
+      Pass{0, x}
+
+def str.drop(n: Nat, +s: String) -> String:
+  match n:
+    case 0n:
+      s
+    case 1n+p:
+      match s:
+        case SNil{}:
+          SNil{}
+        case SCon{h, +t}:
+          str.drop(p, t)
+
+def Pass.n(ps: Pass) -> U32:
+  Pass{+n, +q} = ps
+  n
+
+def Pass.prev(ps: Pass) -> U32:
+  Pass{+n, +q} = ps
+  q
+
+# pos: the position of s's head. Once a match exists and no thread is live, the rest of s cannot change it.
+# With no thread live and no match yet, a char outside lead cannot start one, so the chars up to
+# the next one in lead pass without a step: the seed there sees the char before it as prev.
+# fuel: each round eats at least one char.
+def run(fuel: Nat, s: String, +prog: Trie<Inst>, +cfuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +lead: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +any: Bool, +pos: U32, st: Vm) -> Maybe<&2, List<&2, Maybe<&2, U32>>>:
+  match fuel:
+    case 0n:
+      None{}
+    case 1n+f:
+      match s:
+        case SNil{}:
+          Vm{ths, best} = st
+          run.end(scan(ths, prog, None{}, any, Sc{Nil{}, best, False{}}))
+        case SCon{+c, +t}:
+          match st:
+            case Vm{Nil{}, Some{b}}:
+              Some{b}
+            case Vm{Nil{}, None{}}:
+              +ps = skip.lead(lead, asc, t, c)
+              +r = str.drop(U32.to_nat(Pass.n(ps)), t)
+              +p = ((pos + 1 : U32) + Pass.n(ps) : U32)
+              run(f, r, prog, cfuel, init, start, lead, asc, any, p, run.close(Sc{Nil{}, None{}, False{}}, prog, cfuel, init, start, p, Some{Chr{Pass.prev(ps)}}, String.get(r, 0n)))
+            case Vm{ths, best}:
+              +p = (pos + 1 : U32)
+              run(f, t, prog, cfuel, init, start, lead, asc, any, p, run.step(Vm{ths, best}, prog, cfuel, init, start, any, p, c, String.get(t, 0n)))
 
 type Span is Data:
   Span{start: U32, end: U32}
@@ -1326,9 +1421,9 @@ def find.spans(m: Maybe<&2, List<&2, Maybe<&2, U32>>>) -> Maybe<&2, List<&2, May
 
 # slots: capture slots to keep; is_match keeps none, so each ISave is free.
 def exec(re: Regex, +s: String, +any: Bool) -> Maybe<&2, List<&2, Maybe<&2, U32>>>:
-  Regex{+prog, +fuel, +slots, +start, bits, asc, plain, must, reverse} = re
+  Regex{+prog, +fuel, +slots, +start, +lead, bits, +asc, plain, must, reverse} = re
   +init = List.replicate(Maybe<&2, U32>, Bool.pick(Nat, any, 0n, slots), None{})
-  run(s, prog, fuel, init, start, any, 0, run.close(Sc{Nil{}, None{}, False{}}, prog, fuel, init, start, 0, None{}, String.get(s, 0n)))
+  run(Nat.add(String.length(s), 1n), s, prog, fuel, init, start, lead, asc, any, 0, run.close(Sc{Nil{}, None{}, False{}}, prog, fuel, init, start, 0, None{}, String.get(s, 0n)))
 
 # The leftmost match in s: the span of group 0, then of each group; None for a group that did not take part.
 def find(re: Regex, +s: String) -> Maybe<&2, List<&2, Maybe<&2, Span>>>:
@@ -1402,7 +1497,7 @@ def bits.is_match(b: Bits, start: Maybe<&2, List<&2, Inst>>, s: String) -> Bool:
 
 # The bit NFA form of is_match, or None when the program is too large or has a word boundary.
 def is_match.bits(re: Regex, s: String) -> Maybe<&2, Bool>:
-  Regex{prog, fuel, slots, start, bits, asc, plain, must, reverse} = re
+  Regex{prog, fuel, slots, start, lead, bits, asc, plain, must, reverse} = re
   match bits:
     case None{}:
       None{}
@@ -1513,25 +1608,6 @@ def dec.if(ok: Bool, a: Array<U32>, +len: U32, +i: U32) -> Array<U32> & Dc:
 def dec(a: Array<U32>, +len: U32, +i: U32) -> Array<U32> & Dc:
   dec.if(U32.is_lt(i, len), a, len, i)
 
-def asc.word(k: U32, a: Asc) -> U32:
-  match k:
-    case 0:
-      Asc{m0, m1, m2, m3} = a
-      m0
-    case 1:
-      Asc{m0, m1, m2, m3} = a
-      m1
-    case 2:
-      Asc{m0, m1, m2, m3} = a
-      m2
-    case _:
-      Asc{m0, m1, m2, m3} = a
-      m3
-
-# Any non-ASCII byte may start a match: it may lead a char in start.
-def asc.has(+b: U32, a: Asc) -> Bool:
-  U32.is_le(128, b) || U32.is_ne((U32.shrn(asc.word((b >> 5n : U32), a), U32.to_nat((b .&. 31 : U32))) .&. 1 : U32), 0)
-
 def probe.of(+m: Asc, r: Array<U32> & U32) -> Array<U32> & Bool:
   (a, +v) = r
   (a, asc.has(v, m))
@@ -1572,17 +1648,38 @@ def rb.step(r: Array<U32> & Dc, +j: U32, st: Vm, +c: U32, +prog: Trie<Inst>, +fu
   (a, +d) = r
   Rb{a, j, d, run.step(st, prog, fuel, init, start, any, j, Chr{c}, Dc.char(d))}
 
-# A fresh seed at k. start is Some here, so no assertion is reachable before a char and prev does not count.
+# The char before byte k as an assertion reads it: None at 0, an ASCII byte as itself, and
+# U+FFFD, which is no word char, for a byte of a wider char. k is on a char boundary.
+def prev.byte(r: Array<U32> & U32) -> Array<U32> & Maybe<&2, Char>:
+  (a, +b) = r
+  (a, Some{Chr{Bool.pick(U32, U32.is_lt(b, 128), b, 65533)}})
+
+def prev.if(z: Bool, a: Array<U32>, +k: U32) -> Array<U32> & Maybe<&2, Char>:
+  match z:
+    case True{}:
+      (a, None{})
+    case False{}:
+      prev.byte(Bytes.peek(a, (k - 1 : U32)))
+
+def prev.at(a: Array<U32>, +k: U32) -> Array<U32> & Maybe<&2, Char>:
+  prev.if(U32.is_eq(k, 0), a, k)
+
+def rb.seed.at(r: Array<U32> & Maybe<&2, Char>, +k: U32, +d: Dc, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>) -> Rb:
+  (a, +prev) = r
+  Rb{a, k, d, run.close(Sc{Nil{}, None{}, False{}}, prog, fuel, init, start, k, prev, Dc.char(d))}
+
+# A fresh seed at k.
 def rb.seed(r: Array<U32> & Dc, +k: U32, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>) -> Rb:
   (a, +d) = r
-  Rb{a, k, d, run.close(Sc{Nil{}, None{}, False{}}, prog, fuel, init, start, k, None{}, Dc.char(d))}
+  rb.seed.at(prev.at(a, k), k, d, prog, fuel, init, start)
 
 def rb.skip(r: Array<U32> & U32, +len: U32, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>) -> Rb:
   (a, +k) = r
   rb.seed(dec(a, len, k), k, prog, fuel, init, start)
 
 # No thread is live and no match exists. With asc, the seed at the char before j was skipped
-# because that char cannot start a match: jump to the next byte that may. Without asc, the
+# because that char cannot start a match: jump to the next byte that may, and seed there with the
+# byte before it as prev. Without asc, the
 # seed died on an assertion, so step on as usual; prev matters then.
 def rb.idle(asc: Maybe<&2, Asc>, a: Array<U32>, +len: U32, +j: U32, +c: U32, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +any: Bool) -> Rb:
   match asc:
@@ -2386,7 +2483,7 @@ def exec.bytes.must(m: Maybe<&2, U32>, rev: Maybe<&2, Bits>, b: Bytes.Bytes, +pl
       exec.bytes.must.hit(b, rev, c, plain, prog, fuel, init, start, asc, any, slots)
 
 def exec.bytes(re: Regex, b: Bytes.Bytes, +any: Bool) -> Bytes.Bytes & Maybe<&2, List<&2, Maybe<&2, U32>>>:
-  Regex{+prog, +fuel, +slots, +start, bits, +asc, plain, must, reverse} = re
+  Regex{+prog, +fuel, +slots, +start, lead, bits, +asc, plain, must, reverse} = re
   +sl = Bool.pick(Nat, any, 0n, slots)
   exec.bytes.must(must, reverse, b, plain, prog, fuel, List.replicate(Maybe<&2, U32>, sl, None{}), start, asc, any, sl)
 
@@ -2465,7 +2562,7 @@ def bits.bytes.if(m: Maybe<&2, Bits>, start: Maybe<&2, List<&2, Inst>>, asc: May
 
 # The bit NFA form of is_match over Bytes, or None when the program does not allow it.
 def is_match.bytes.bits(re: Regex, b: Bytes.Bytes) -> Bytes.Bytes & Maybe<&2, Bool>:
-  Regex{prog, fuel, slots, start, bt, asc, plain, must, reverse} = re
+  Regex{prog, fuel, slots, start, lead, bt, asc, plain, must, reverse} = re
   bits.bytes.if(bt, start, asc, b)
 
 def is_match.bytes.pick(r: Bytes.Bytes & Maybe<&2, Bool>, re: Regex) -> Bytes.Bytes & Bool:

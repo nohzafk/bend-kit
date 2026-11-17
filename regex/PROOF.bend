@@ -505,3 +505,39 @@ def Laws.fold_bits_not_word():
 
 def Laws.fold_bits_bytes():
   {==}
+
+def Laws.lead_boundary():
+  {==}
+
+def Laws.lead_boundary_bytes():
+  {==}
+
+def Laws.lead_boundary_after_wide():
+  {==}
+
+def Laws.lead_boundary_after_wide_bytes():
+  {==}
+
+def Laws.lead_not_boundary():
+  {==}
+
+def Laws.lead_not_boundary_bytes():
+  {==}
+
+def Laws.lead_start():
+  {==}
+
+def Laws.lead_start_bytes():
+  {==}
+
+def Laws.lead_digits():
+  {==}
+
+def Laws.lead_digits_bytes():
+  {==}
+
+def Laws.lead_fold_boundary():
+  {==}
+
+def Laws.lead_fold_boundary_bytes():
+  {==}

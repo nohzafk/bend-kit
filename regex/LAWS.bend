@@ -606,3 +606,41 @@ law fold_bits_not_word:
 
 law fold_bits_bytes:
   {bboth(R.compile("(?i)[k]"), "\u{e2}\u{84}\u{aa}") == yes() : Maybe<&2, Bool> & Bool}
+
+# A pattern led by an assertion still skips: a char outside the sets past the assertions starts
+# no match. The seed after a skip sees the char before it, so \b and \B still hold. Spans from Go's regexp.
+law lead_boundary:
+  {m("\\bfoo\\b", "xfoo, foo") == Some{[sp(6, 9)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law lead_boundary_bytes:
+  {mb("\\bfoo\\b", "xfoo, foo") == Some{[sp(6, 9)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law lead_boundary_after_wide:
+  {m("\\bfoo", "\u{e9}foo") == Some{[sp(1, 4)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law lead_boundary_after_wide_bytes:
+  {mb("\\bfoo", "\u{c3}\u{a9}foo") == Some{[sp(2, 5)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law lead_not_boundary:
+  {m("\\Bfoo", "foo xfoo") == Some{[sp(5, 8)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law lead_not_boundary_bytes:
+  {mb("\\Bfoo", "foo xfoo") == Some{[sp(5, 8)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law lead_start:
+  {m("^b", "ab") == None{} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law lead_start_bytes:
+  {mb("^b", "ab") == None{} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law lead_digits:
+  {m("\\b\\d+\\b", "a1 22b 333") == Some{[sp(7, 10)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law lead_digits_bytes:
+  {mb("\\b\\d+\\b", "a1 22b 333") == Some{[sp(7, 10)]} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law lead_fold_boundary:
+  {m("(?i)\\bk", "xk \u{212a}") == None{} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
+
+law lead_fold_boundary_bytes:
+  {mb("(?i)\\bk", "xk \u{e2}\u{84}\u{aa}") == None{} : Maybe<&2, List<&2, Maybe<&2, R.Span>>>}
