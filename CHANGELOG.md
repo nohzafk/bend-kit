@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `markdown` 0.3.2.0: render a paragraph in time linear in its length. One paragraph of 800 lines with a link on each line took 816 ms and now takes 27 ms. The emphasis pass no longer searches the whole stack for each closer, a link no longer walks every inline before it, and a reference label is computed only when the inline link fails. Output does not change. No API change.
 - `stats` 0.1.7.0: seed integer square root from the input bit length, run four Newton steps, and certify the corrected result against both universal bounds. Keep the proved search for a failed certificate. The fixed workload takes 10.034 ms, down from 17.759 ms; results and the API stay unchanged.
 - `stats` 0.1.6.0: prove gcd greatestness for every Nat common divisor and lcm minimality for every Nat common multiple, including zero inputs. Raise gcd fuel to 65 steps and prove the bound by halving the larger input after each pair of Euclid steps. Public results stay unchanged.
 - `runner` 0.15.0.0: import `hairpin` 0.14.1.0, `http` 0.38.6.0, `journal` 0.3.1.1, and `webhooks` 0.12.0.0. A job that hands `Hairpin.outcome` to runner gets `Retry.Rejected` for a 4xx. Breaking.

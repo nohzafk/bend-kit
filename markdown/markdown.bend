@@ -1556,12 +1556,13 @@ def blocks(s: String) -> List<&2, Kid> & List<&2, Ref>:
 
 # ---- inlines
 
-# An inline in progress. IHtml is finished output and its plain text, for image alt text.
+# An inline in progress. IHtml is finished output and its plain text, for image alt text. IMark renders as nothing; no active link bracket lies below it.
 type Inl is Data:
   IText{s: String}
   IHtml{html: String, plain: String}
   IDelim{c: U32, n: U32, orig: U32, open: Bool, close: Bool}
   IBrack{img: Bool, active: Bool, after: String}
+  IMark{}
 
 def rep(+c: U32, n: U32) -> String:
   String.repeat(one(c), U32.to_nat(n))
@@ -1578,6 +1579,8 @@ def r.inl(xs: List<&2, Inl>) -> String:
       rep(c, n) ++ r.inl(rest)
     case Con{IBrack{img, a, af}, rest}:
       Bool.pick(String, img, "![", "[") ++ r.inl(rest)
+    case Con{IMark{}, rest}:
+      r.inl(rest)
 
 def p.inl(xs: List<&2, Inl>) -> String:
   match xs:
@@ -1591,6 +1594,8 @@ def p.inl(xs: List<&2, Inl>) -> String:
       rep(c, n) ++ p.inl(rest)
     case Con{IBrack{img, a, af}, rest}:
       Bool.pick(String, img, "![", "[") ++ p.inl(rest)
+    case Con{IMark{}, rest}:
+      p.inl(rest)
 
 # ---- emphasis
 
@@ -1613,7 +1618,7 @@ def find(stack: List<&2, Inl>, +c: U32, +orig: U32, +copen: Bool, +acc: List<&2,
       None{}
     case Con{IDelim{+c2, +n2, +o2, +op2, +cl2}, +rest}:
       +fits = Bool.pick(Bool, eq(c, 126), eq(o2, orig), Bool.not(odd_fail(cl2, o2, copen, orig)))
-      Bool.pick(Maybe<&2, Fd>, eq(c2, c) && op2 && fits, Some{Fd{acc, c2, n2, o2, op2, cl2, rest}}, find(rest, c, orig, copen, IDelim{c2, n2, o2, op2, cl2} <> acc))
+      when(Maybe<&2, Fd>, eq(c2, c) && op2 && fits, u => Some{Fd{acc, c2, n2, o2, op2, cl2, rest}}, u => find(rest, c, orig, copen, IDelim{c2, n2, o2, op2, cl2} <> acc))
     case Con{x, rest}:
       find(rest, c, orig, copen, x <> acc)
 
@@ -2073,11 +2078,16 @@ def brk(out: List<&2, Inl>, acc: List<&2, Inl>) -> Maybe<&2, Bk>:
     case Con{x, rest}:
       brk(rest, x <> acc)
 
+# Deactivates the link brackets below a new link. It stops at an IMark or an inactive bracket, because all brackets below one are already inactive.
 def deact(xs: List<&2, Inl>) -> List<&2, Inl>:
   match xs:
     case Nil{}:
       Nil{}
-    case Con{IBrack{False{}, a, af}, rest}:
+    case Con{IMark{}, rest}:
+      IMark{} <> rest
+    case Con{IBrack{False{}, False{}, af}, rest}:
+      IBrack{False{}, False{}, af} <> rest
+    case Con{IBrack{False{}, True{}, af}, rest}:
       IBrack{False{}, False{}, af} <> deact(rest)
     case Con{x, rest}:
       x <> deact(rest)
@@ -2148,13 +2158,6 @@ def inl.open(+b: String) -> Maybe<&2, Lt>:
 def inl.tail(+t: String) -> Maybe<&2, Lt>:
   Bool.pick(Maybe<&2, Lt>, eq(hd(t), 40), inl.open(wsp(String.drop(t, 1n))), None{})
 
-def lt_or(a: Maybe<&2, Lt>, b: Maybe<&2, Lt>) -> Maybe<&2, Lt>:
-  match a:
-    case Some{x}:
-      Some{x}
-    case None{}:
-      b
-
 def title_attr(m: Maybe<&2, String>) -> String:
   match m:
     case None{}:
@@ -2170,7 +2173,7 @@ def link.make(lt: Lt, xs: List<&2, Inl>, +img: Bool, +below: List<&2, Inl>, +o: 
       +u = url(o.safe(o), d)
       when(Is, img,
         z => Is{rest, 93, SNil{}, IHtml{"<img src=\"" ++ u ++ "\" alt=\"" ++ esc(plain) ++ "\"" ++ title_attr(t) ++ " />", plain} <> below},
-        z => Is{rest, 93, SNil{}, IHtml{"<a href=\"" ++ u ++ "\"" ++ title_attr(t) ++ ">" ++ r.inl(ys) ++ "</a>", plain} <> deact(below)})
+        z => Is{rest, 93, SNil{}, IHtml{"<a href=\"" ++ u ++ "\"" ++ title_attr(t) ++ ">" ++ r.inl(ys) ++ "</a>", plain} <> IMark{} <> deact(below)})
 
 def link.fail(above: List<&2, Inl>, +img: Bool, below: List<&2, Inl>, +t: String) -> Is:
   Is{t, 93, SCon{']', SNil{}}, List.append(&2, Inl, List.reverse(&2, Inl, above), IText{Bool.pick(String, img, "![", "[")} <> below)}
@@ -2182,6 +2185,15 @@ def link.try(m: Maybe<&2, Lt>, above: List<&2, Inl>, +img: Bool, below: List<&2,
     case None{}:
       link.fail(above, img, below, t)
 
+# An inline link, else a reference link. The raw label costs the length of the rest of the paragraph, so it waits for the inline link to fail.
+def link.inl(m: Maybe<&2, Lt>, above: List<&2, Inl>, +img: Bool, below: List<&2, Inl>, +t: String, +after: String, +refs: List<&2, Ref>, +o: Opts) -> Is:
+  match m:
+    case Some{lt}:
+      link.make(lt, above, img, below, o)
+    case None{}:
+      +raw = String.take(after, Nat.sub(Nat.sub(String.length(after), String.length(t)), 1n))
+      link.try(ref.tail(t, raw, refs), above, img, below, t, o)
+
 def close.br(m: Maybe<&2, Bk>, +t: String, +out: List<&2, Inl>, +refs: List<&2, Ref>, +o: Opts) -> Is:
   match m:
     case None{}:
@@ -2191,8 +2203,7 @@ def close.br(m: Maybe<&2, Bk>, +t: String, +out: List<&2, Inl>, +refs: List<&2, 
         case False{}:
           link.fail(above, img, below, t)
         case True{}:
-          +raw = String.take(after, Nat.sub(Nat.sub(String.length(after), String.length(t)), 1n))
-          link.try(lt_or(inl.tail(t), ref.tail(t, raw, refs)), above, img, below, t, o)
+          link.inl(inl.tail(t), above, img, below, t, after, refs, o)
 
 # ---- the scanner loop
 
