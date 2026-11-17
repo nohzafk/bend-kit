@@ -130,6 +130,28 @@ static void integers(size_t n) {
     clock_gettime(CLOCK_MONOTONIC, &t1);
     printf("%s\t%.3f\t%u\n", ops[op], ms(t0, t1), checksum);
   }
+  uint32_t *packed = malloc((n + 55) * 2 * sizeof *packed);
+  if (!packed) exit(1);
+  for (size_t i = 0; i < n + 55; i++) {
+    packed[2 * i] = pairs[i][0];
+    packed[2 * i + 1] = pairs[i][1];
+  }
+  struct timespec t0, t1;
+  uint32_t checksum = 0;
+  clock_gettime(CLOCK_MONOTONIC, &t0);
+  for (size_t i = 0; i < (n + 55) * 2; i += 2)
+    checksum += packed[i];
+  clock_gettime(CLOCK_MONOTONIC, &t1);
+  printf("packed_identity\t%.3f\t%u\n", ms(t0, t1), checksum);
+  for (int op = 0; op < 3; op++) {
+    checksum = 0;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    for (size_t i = 0; i < (n + 55) * 2; i += 2)
+      checksum += funcs[op](packed[i], packed[i + 1]);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    printf("packed_%s\t%.3f\t%u\n", ops[op], ms(t0, t1), checksum);
+  }
+  free(packed);
   free(pairs);
 }
 

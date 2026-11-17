@@ -210,3 +210,46 @@ The final full harness gives:
 All six languages agree in every baseline and final run. The checksums remain mean `3422847917`, variance `1370401302`, median `1092607460`, histogram `1092535808`, gcd `18047959`, lcm `3181042401`, and isqrt `1421540955`.
 
 [Issue #773](https://github.com/paymog/bend-kit/issues/773) tracks separate kernel, traversal, and release measurements. [Issue #774](https://github.com/paymog/bend-kit/issues/774) tracks a direct Newton convergence proof to remove runtime certification. The temporary profiling and exhaustive-check programs are not part of the package.
+
+## Packed kernels and list ownership
+
+`python3 stats/bench/run.py` now keeps the seven original end-to-end rows and adds four packed-input rows in every language. The input and integer functions are unchanged. The small 71-pair probe runs before the full 2097207-pair input. Every packed result must match its original checksum in every run. The harness also checks the Bend ownership passes against those same checksums.
+
+Each language builds an interleaved sequence of U32 words before timing: `a0, b0, a1, b1, ...`. C uses a `uint32_t` allocation, Rust uses `Vec<u32>`, Bun and Node use `Uint32Array`, Python uses `array('I')`, and Bend uses `Array<U32>`. The same allocation survives all four packed passes. Allocation, conversion, and release are outside their clocks. Each pass includes reads, calls, and checksum accumulation. These are direct packed-loop measurements, not isolated kernel times.
+
+Bend carries the affine array through each clock boundary and reads its first word after the last clock. Its array has power-of-two capacity. The loop preloads one extra unused pair at the end; only the requested pairs contribute to the checksum. The identity pass uses the same reader and sum loop as the kernels. Native compilers can optimize unused loads and vectorize identity differently, so subtraction is only an estimate.
+
+The Bend-only diagnostic creates a separate copy of the fixed list before timing. Identity, gcd, lcm, and isqrt retain that same shared list. The final identity pass consumes and releases it. This keeps the original end-to-end workload intact and makes ownership costs explicit. Python and JavaScript keep their packed allocation alive through all passes; their collectors can still run during a clock. JavaScript timings include JIT warm-up.
+
+### Results
+
+M4 Pro, macOS 25.6.0 arm64, 2026-11-17. Stats 0.1.7.0, Bend 2.0.38, Apple clang 21.0.0 (`-O2`), rustc 1.91.0 (`-C opt-level=3`), Bun 1.4.4, Node 24.0.1, Python 3.14.6. Command: `python3 stats/bench/run.py`. Three-run medians in ms. A monitor caps Bend at 8 GiB RSS; no process reached the cap.
+
+| direct packed-loop measurement | C | Rust | Bun | Node | Python | Bend |
+|---|---:|---:|---:|---:|---:|---:|
+| identity | 0.355 | 0.212 | 50.396 | 11.607 | 301.559 | 0.952 |
+| gcd | 126.534 | 125.276 | 831.830 | 500.159 | 410.643 | 120.408 |
+| checked lcm | 126.289 | 126.093 | 843.569 | 496.617 | 595.255 | 121.034 |
+| isqrt | 31.732 | 5.388 | 272.766 | 177.555 | 325.807 | 6.251 |
+
+The harness subtracts packed identity from each packed kernel **within each run**, then takes the median of those differences. These are kernel-cost estimates, not directly measured kernel times. It does not subtract the displayed medians, and it does not clamp negative estimates.
+
+| estimated kernel cost | C | Rust | Bun | Node | Python | Bend |
+|---|---:|---:|---:|---:|---:|---:|
+| gcd | 126.179 | 125.066 | 781.137 | 488.552 | 108.173 | 119.344 |
+| checked lcm | 125.928 | 125.649 | 792.876 | 484.880 | 293.836 | 120.124 |
+| isqrt | 31.435 | 5.158 | 222.073 | 165.818 | 24.248 | 5.299 |
+
+| Bend list ownership pass | ms | checksum |
+|---|---:|---:|
+| identity, shared | 7.996 | 2699619501 |
+| gcd, shared | 133.852 | 18047959 |
+| checked lcm, shared | 135.074 | 3181042401 |
+| isqrt, shared | 9.644 | 1421540955 |
+| identity, consuming and releasing | 26.984 | 2699619501 |
+
+The original integer rows remain available: C/Rust/Bun/Node/Python/Bend gcd is 126.630/124.897/834.346/711.659/325.585/134.591 ms; lcm is 126.779/124.908/833.611/520.018/515.252/134.067 ms; isqrt is 31.766/5.471/261.937/190.485/237.207/29.548 ms. Bend's original isqrt is the final consuming list traversal. Its cost must not be compared with a retained packed loop as though both measured only arithmetic.
+
+All six languages retain the seven existing checksums above. Every identity pass gives `2699619501`; packed gcd, lcm, and isqrt give `18047959`, `3181042401`, and `1421540955`. No library code or package version changes in this benchmark update. The packed rows provide the stats 0.1.7.0 baseline for the direct Newton proof work.
+
+[Issue #777](https://github.com/paymog/bend-kit/issues/777) tracks warmed JavaScript comparisons and estimate spread. The cold JIT rows above remain part of this benchmark.

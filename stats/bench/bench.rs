@@ -90,6 +90,26 @@ fn integers() {
         }
         println!("{op}\t{:.3}\t{checksum}", t0.elapsed().as_secs_f64() * 1e3);
     }
+    let mut packed = Vec::with_capacity(pairs.len() * 2);
+    for &(a, b) in &pairs {
+        packed.extend_from_slice(&[a, b]);
+    }
+    let t0 = Instant::now();
+    let mut checksum = 0u32;
+    for pair in packed.chunks_exact(2) {
+        checksum = checksum.wrapping_add(pair[0]);
+    }
+    println!("packed_identity\t{:.3}\t{checksum}", t0.elapsed().as_secs_f64() * 1e3);
+    for (op, f) in [("packed_gcd", gcd as fn(u32, u32) -> u32),
+                    ("packed_lcm", lcm), ("packed_isqrt", |a: u32, _| a.isqrt())] {
+        let t0 = Instant::now();
+        let mut checksum = 0u32;
+        for pair in packed.chunks_exact(2) {
+            checksum = checksum.wrapping_add(f(pair[0], pair[1]));
+        }
+        println!("{op}\t{:.3}\t{checksum}", t0.elapsed().as_secs_f64() * 1e3);
+    }
+    drop(packed);
 }
 
 fn main() {
