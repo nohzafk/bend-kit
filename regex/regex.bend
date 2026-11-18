@@ -1043,20 +1043,73 @@ def asc.bit(hit: Bool, +c: U32, a: Asc) -> Asc:
       +b = (1 << U32.to_nat((c .&. 31 : U32)) : U32)
       Asc{Bool.pick(U32, U32.is_eq((c >> 5n : U32), 0), (m0 .|. b : U32), m0), Bool.pick(U32, U32.is_eq((c >> 5n : U32), 1), (m1 .|. b : U32), m1), Bool.pick(U32, U32.is_eq((c >> 5n : U32), 2), (m2 .|. b : U32), m2), Bool.pick(U32, U32.is_eq((c >> 5n : U32), 3), (m3 .|. b : U32), m3)}
 
+# The bits a..b of a word, or none when out.
+def rng.mask(out: Bool, +a: U32, +b: U32) -> U32:
+  match out:
+    case True{}:
+      0
+    case False{}:
+      ((4294967295 << U32.to_nat(a) : U32) .&. U32.shrn(4294967295, U32.to_nat((31 - b : U32))) : U32)
+
+# The bytes lo..hi of the word for bytes base to base+31.
+def rng.word(+base: U32, +lo: U32, +hi: U32) -> U32:
+  +top = (base + 31 : U32)
+  rng.mask(U32.is_lt(hi, base) || U32.is_lt(top, lo), (U32.max(lo, base) - base : U32), (Bool.pick(U32, U32.is_lt(hi, top), hi, top) - base : U32))
+
 # c: the byte for step n, counting down from 127 to 0.
-def asc.go(n: Nat, +c: U32, +sets: List<&2, Inst>, a: Asc) -> Asc:
+def item.scan(n: Nat, +c: U32, +i: Item, a: Asc) -> Asc:
   match n:
     case 0n:
       a
     case 1n+p:
-      asc.go(p, (c - 1 : U32), sets, asc.bit(starts(sets, c), c, a))
+      item.scan(p, (c - 1 : U32), i, asc.bit(item.has(i, c), c, a))
+
+# The ASCII bytes of an item: a range by its bounds, others byte by byte.
+def item.asc(i: Item) -> Asc:
+  match i:
+    case Rng{+lo, +hi}:
+      Asc{rng.word(0, lo, hi), rng.word(32, lo, hi), rng.word(64, lo, hi), rng.word(96, lo, hi)}
+    case Prop{neg, name}:
+      item.scan(128n, 127, Prop{neg, name}, Asc{0, 0, 0, 0})
+    case Fold{neg, xs}:
+      item.scan(128n, 127, Fold{neg, xs}, Asc{0, 0, 0, 0})
+
+def asc.union(a: Asc, b: Asc) -> Asc:
+  Asc{a0, a1, a2, a3} = a
+  Asc{b0, b1, b2, b3} = b
+  Asc{(a0 .|. b0 : U32), (a1 .|. b1 : U32), (a2 .|. b2 : U32), (a3 .|. b3 : U32)}
+
+def asc.flip(neg: Bool, a: Asc) -> Asc:
+  match neg:
+    case False{}:
+      a
+    case True{}:
+      Asc{a0, a1, a2, a3} = a
+      Asc{U32.not(a0), U32.not(a1), U32.not(a2), U32.not(a3)}
+
+def items.asc(xs: List<&2, Item>, a: Asc) -> Asc:
+  match xs:
+    case Nil{}:
+      a
+    case Con{h, t}:
+      items.asc(t, asc.union(a, item.asc(h)))
+
+# The ASCII bytes that start sets, as starts finds them.
+def sets.asc(xs: List<&2, Inst>, a: Asc) -> Asc:
+  match xs:
+    case Nil{}:
+      a
+    case Con{ISet{neg, set}, t}:
+      sets.asc(t, asc.union(a, asc.flip(neg, items.asc(set, Asc{0, 0, 0, 0}))))
+    case Con{i, t}:
+      sets.asc(t, a)
 
 def asc(start: Maybe<&2, List<&2, Inst>>) -> Maybe<&2, Asc>:
   match start:
     case None{}:
       None{}
     case Some{sets}:
-      Some{asc.go(128n, 127, sets, Asc{0, 0, 0, 0})}
+      Some{sets.asc(sets, Asc{0, 0, 0, 0})}
 
 def asc.word(k: U32, a: Asc) -> U32:
   match k:
@@ -1747,11 +1800,19 @@ def rev.if(ok: Bool, node: Node) -> Maybe<&2, Bits>:
 type Regex is Data:
   Regex{prog: Trie<Inst>, fuel: Nat, slots: Nat, start: Maybe<&2, List<&2, Inst>>, lead: Maybe<&2, List<&2, Inst>>, bits: Maybe<&2, Bits>, asc: Maybe<&2, Asc>, plain: Bool, must: Maybe<&2, U32>, reverse: Maybe<&2, Bits>, need: Maybe<&2, Need>, needb: Maybe<&2, Need>, gate: Bool}
 
+# A walk that reaches start meets no assertion, so passing assertions changes nothing: lead is start.
+def lead.of(start: Maybe<&2, List<&2, Inst>>, fuel: Nat, +insts: List<&2, Inst>) -> Maybe<&2, List<&2, Inst>>:
+  match start:
+    case Some{sets}:
+      Some{sets}
+    case None{}:
+      first(fuel, True{}, insts, Fs{[0], Nil{}, Nil{}})
+
 def build(+node: Node, +n: U32) -> Regex:
   +insts = {ISave{0} <> emit(node, 1, [ISave{1}, IMatch{}]) : List<&2, Inst>}
   +fuel = Nat.add(Nat.mul(3n, List.length(&2, Inst, insts)), 2n)
   +start = first(fuel, False{}, insts, Fs{[0], Nil{}, Nil{}})
-  +lead = first(fuel, True{}, insts, Fs{[0], Nil{}, Nil{}})
+  +lead = lead.of(start, fuel, insts)
   +plain = bits.plain(insts)
   +need = need.of(node, False{})
   Regex{trie.from(Inst, insts, 0, TTip{}), fuel, U32.to_nat((2 * n : U32)), start, lead, bits(fuel, insts), asc(lead), plain, required(node), rev.if(reverse.ok(node), node), need, need.of(node, True{}), need.gate(need, plain)}
