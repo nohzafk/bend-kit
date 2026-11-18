@@ -79,7 +79,7 @@ The Bend column for regex 0.8.0.0 and 0.9.0.0, built with two compilers, same ma
 | redos | 0.2 | 0.2 | 0.2 | 0.1 |
 | large | 1,162.0 | 1,165.9 | 1,153.6 | 1,138.4 |
 
-In 0.9.0.0, `is_match`, `is_match_live`, `sparse` and `sparse_hit` spend nearly all their time in the required-literal scan: no literal in the text means no automaton runs, and `is_match` of `hello\w+` runs the bit NFA from the literal. That scan takes about 1.9 ms per MiB built with bend 2.0.38 and 0.3 ms with 2.0.40, so with 2.0.38 those cases are slower than 0.8.0.0, whose single-byte search is faster there.
+In 0.9.0.0, `is_match`, `is_match_live`, `sparse` and `sparse_hit` spend nearly all their time in the required-literal scan over `Bytes`, which reads the buffer a 32-bit word at a time: no literal in the text means no automaton runs, and `is_match` of `hello\w+` runs the bit NFA from the literal. That scan takes about 1.9 ms per MiB built with bend 2.0.38 and 0.3 ms with 2.0.40. 0.8.0.0 has no such scan: `is_match` skips with the byte table and `sparse` searches for one required byte, about 1.2 ms per MiB with either compiler. So built with bend 2.0.38, `is_match`, `sparse` and `sparse_hit` are about 0.7 ms per MiB slower in 0.9.0.0 than in 0.8.0.0; built with 2.0.40 they are about four times faster. With the scan switched off, 0.9.0.0 built with 2.0.38 gives the times of 0.8.0.0 on these three cases.
 
 Checksums (1 MiB text; 1001 chars for `large`). All non-timeout variants agree.
 
