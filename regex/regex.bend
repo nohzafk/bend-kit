@@ -2364,19 +2364,26 @@ type Dz is Type:
   Dz0{}
   DzL{dl: Dl}
 
-# The DFA over a String. mode picks the round: 0 read s's head in state id, or end at SNil;
-# 1 pass the chars of s that cannot start a match, from the idle state id; 2 learn the step
-# from state id on q; 7 take the step learned, from z; 5 a match; 6 a full cache. rt: the table
-# and, in round 0, its entry for id and s's head. i: the position of s's head, q the char before
-# it (in rounds 2 and 7, i is q's position); p: the last idle point. fuel: each char takes at most
-# three rounds. Each value the next round takes is bound first, so no round delays work into it.
-def dfas(fuel: Nat, +mode: U32, z: Dz, +s: String, rt: Array<U32> & U32, sts: Array<Sk>, +keys: Trie<List<&2, Ix>>, +n: U32, +i: U32, +id: U32, +q: U32, +p: U32, +prog: Trie<Inst>, +cfuel: Nat, +wb: Bool, +lead: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +am: Asc, +sets: List<&2, Inst>, +sk: Bool, +cap: U32) -> Dr:
+# The rounds of dfas.
+type Ds is Data:
+  DsRead{}   # read s's head in state id, or end at SNil
+  DsSkip{}   # pass the chars of s that cannot start a match, from the idle state id
+  DsLearn{}  # learn the step from state id on q
+  DsTake{}   # take the step learned, from z
+  DsHit{}    # a match
+  DsFull{}   # a full cache
+
+# The DFA over a String; mode picks the round. rt: the table and, in DsRead, its entry for id
+# and s's head. i: the position of s's head, q the char before it (in DsLearn and DsTake, i is
+# q's position); p: the last idle point. fuel: each char takes at most three rounds. Each value
+# the next round takes is bound first, so no round delays work into it.
+def dfas(fuel: Nat, +mode: Ds, z: Dz, +s: String, rt: Array<U32> & U32, sts: Array<Sk>, +keys: Trie<List<&2, Ix>>, +n: U32, +i: U32, +id: U32, +q: U32, +p: U32, +prog: Trie<Inst>, +cfuel: Nat, +wb: Bool, +lead: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +am: Asc, +sets: List<&2, Inst>, +sk: Bool, +cap: U32) -> Dr:
   match fuel:
     case 0n:
       DFull{p}
     case 1n+f:
       match mode:
-        case 0:
+        case DsRead{}:
           match s:
             case SNil{}:
               (tab, e) = rt
@@ -2392,16 +2399,16 @@ def dfas(fuel: Nat, +mode: U32, z: Dz, +s: String, rt: Array<U32> & U32, sts: Ar
               +i2 = Bool.pick(U32, adv, i1, i)
               +p2 = Bool.pick(U32, idle, i2, p)
               +hit = ascii && U32.is_eq(e, 1)
-              +mh = Bool.pick(U32, hit, 5, 2)
+              +mh = Bool.pick(Ds, hit, DsHit{}, DsLearn{})
               +h = str.head(t)
               +isk = idle && sk && Bool.not(lead.has(h, am, sets))
-              +mi = Bool.pick(U32, isk, 1, 0)
-              +m = Bool.pick(U32, adv, mi, mh)
+              +mi = Bool.pick(Ds, isk, DsSkip{}, DsRead{})
+              +m = Bool.pick(Ds, adv, mi, mh)
               +col = ((id2 * 128) + h : U32)
               +idx = Bool.pick(U32, adv, col, 0)
               rt2 = Array.get(U32, tab, idx)
               dfas(f, m, Dz0{}, t, rt2, sts, keys, n, i2, id2, x, p2, prog, cfuel, wb, lead, asc, am, sets, sk, cap)
-        case 1:
+        case DsSkip{}:
           (tab, e) = rt
           +pass = skip.lead(lead, asc, s, Chr{q})
           +nn = Pass.n(pass)
@@ -2415,14 +2422,14 @@ def dfas(fuel: Nat, +mode: U32, z: Dz, +s: String, rt: Array<U32> & U32, sts: Ar
           +h = str.head(s2)
           +idx = ((id2 * 128) + h : U32)
           rt2 = Array.get(U32, tab, idx)
-          dfas(f, 0, Dz0{}, s2, rt2, sts, keys, n, i2, id2, q2, p2, prog, cfuel, wb, lead, asc, am, sets, sk, cap)
-        case 2:
+          dfas(f, DsRead{}, Dz0{}, s2, rt2, sts, keys, n, i2, id2, q2, p2, prog, cfuel, wb, lead, asc, am, sets, sk, cap)
+        case DsLearn{}:
           (tab, e) = rt
           z2 = {DzL{dfa.learn(Array.get(Sk, sts, id), tab, keys, n, id, q, prog, cfuel, wb, cap)} : Dz}
           rt2 = {(Array.new(U32, 0n, 0), 0) : Array<U32> & U32}
           sts2 = Array.new(Sk, 0n, dk.key(0, Nil{}))
-          dfas(f, 7, z2, s, rt2, sts2, keys, n, i, id, q, p, prog, cfuel, wb, lead, asc, am, sets, sk, cap)
-        case 7:
+          dfas(f, DsTake{}, z2, s, rt2, sts2, keys, n, i, id, q, p, prog, cfuel, wb, lead, asc, am, sets, sk, cap)
+        case DsTake{}:
           match z:
             case DzL{Dl{t2, s2, +k2, +n2, +id2, +hit}}:
               +ok = U32.is_ne(id2, seed.id())
@@ -2430,18 +2437,18 @@ def dfas(fuel: Nat, +mode: U32, z: Dz, +s: String, rt: Array<U32> & U32, sts: Ar
               +i2 = (i + 1 : U32)
               +p2 = Bool.pick(U32, idle, i2, p)
               +isk = idle && sk
-              +m0 = Bool.pick(U32, isk, 1, 0)
-              +m1 = Bool.pick(U32, ok, m0, 6)
-              +m = Bool.pick(U32, hit, 5, m1)
+              +m0 = Bool.pick(Ds, isk, DsSkip{}, DsRead{})
+              +m1 = Bool.pick(Ds, ok, m0, DsFull{})
+              +m = Bool.pick(Ds, hit, DsHit{}, m1)
               +h = str.head(s)
               +idx = ((id2 * 128) + h : U32)
               rt2 = Array.get(U32, t2, idx)
               dfas(f, m, Dz0{}, s, rt2, s2, k2, n2, i2, id2, q, p2, prog, cfuel, wb, lead, asc, am, sets, sk, cap)
             case Dz0{}:
               DFull{p}
-        case 5:
+        case DsHit{}:
           DHit{p}
-        case _:
+        case DsFull{}:
           DFull{p}
 
 # The char before position p of s, or None at 0.
@@ -2510,7 +2517,7 @@ def exec.at(+k: U32, +r: String, +s: String, +any: Bool, +prog: Trie<Inst>, +fue
   +id = Bool.pick(U32, zero, 0, 1)
   +cap = dk.cap(rest)
   +sk = dk.sk(lead, asc)
-  exec.dr(dfas(Nat.add(Nat.mul(3n, U32.to_nat(rest)), 8n), Bool.pick(U32, sk, 1, 0), Dz0{}, r, Array.get(U32, Array.new(U32, dk.tab(rest), 0), ((id * 128) + str.head(r) : U32)), dk.sts(dk.depth(rest)), dk.keys(cap), 3, k, id, dk.none(), k, prog, fuel, wb, lead, asc, asc.or(asc), lead.sets(lead), sk, cap), any, s, total, prog, fuel, init, start, lead, asc)
+  exec.dr(dfas(Nat.add(Nat.mul(3n, U32.to_nat(rest)), 8n), Bool.pick(Ds, sk, DsSkip{}, DsRead{}), Dz0{}, r, Array.get(U32, Array.new(U32, dk.tab(rest), 0), ((id * 128) + str.head(r) : U32)), dk.sts(dk.depth(rest)), dk.keys(cap), 3, k, id, dk.none(), k, prog, fuel, wb, lead, asc, asc.or(asc), lead.sets(lead), sk, cap), any, s, total, prog, fuel, init, start, lead, asc)
 
 # found: whether s holds a literal, r being s from the first, where the automata start.
 def exec.lit(found: Bool, +r: String, +s: String, +any: Bool, +prog: Trie<Inst>, +fuel: Nat, +slots: Nat, +start: Maybe<&2, List<&2, Inst>>, +lead: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +plain: Bool) -> Maybe<&2, List<&2, Maybe<&2, U32>>>:
@@ -3409,15 +3416,16 @@ def skip.wide(fuel: Nat, +ph: U32, r: Array<U32> & U32, +len: U32, +k: U32, +m: 
         case _:
           r
 
-# The round after a step to state id, the next char at i: 6 the cache is full, 4 the end of the
-# text, 1 an idle state that skips, else ready (0 when the next read is primed, else 8).
-def dfa.mode(+id: U32, +i: U32, +len: U32, +sk: Bool, +ready: U32) -> U32:
+# The round after a step to state id, the next char at i: DbFull when the cache is full, DbEnd
+# at the end of the text, DbSkip in an idle state that skips, else ready (DbRead when the next
+# read is primed, else DbPrime).
+def dfa.mode(+id: U32, +i: U32, +len: U32, +sk: Bool, +ready: Db) -> Db:
   +full = U32.is_eq(id, seed.id())
   +more = U32.is_lt(i, len)
   +isk = sk && U32.is_le(id, 2)
-  +m0 = Bool.pick(U32, isk, 1, ready)
-  +m1 = Bool.pick(U32, more, m0, 4)
-  Bool.pick(U32, full, 6, m1)
+  +m0 = Bool.pick(Db, isk, DbSkip{}, ready)
+  +m1 = Bool.pick(Db, more, m0, DbEnd{})
+  Bool.pick(Db, full, DbFull{}, m1)
 
 def dfab.end(r: Array<Sk> & Sk, a: Array<U32>, +p: U32, +prog: Trie<Inst>, +cfuel: Nat) -> Array<U32> & Dr:
   (sts, +key) = r
@@ -3435,22 +3443,32 @@ def dfab.learn(rd: Array<U32> & Dc, r: Array<Sk> & Sk, tab: Array<U32>, +keys: T
   (a, +d) = rd
   Dlb{a, dc.w(d), dfa.learn(r, tab, keys, n, id, dc.c(d), prog, cfuel, wb, cap)}
 
-# The DFA over the bytes of a, up to len. mode picks the round: 0 read the byte b at i in state
-# id; 8 prime round 0 at i; 1 skip from the idle state id at i; 9 take the skip's offset; 10 take
-# the kind of the byte before i; 2 learn the step on the char at i; 7 take it, from z; 4 the end
-# of the text; 5 a match; 6 a full cache. A read hands back the array beside the value, and a
-# round may not take apart a computed value, so each round passes its reads to the next: ra the
-# buffer and, in round 0, the byte after b; rt the table and, in round 0, its entry for id and b.
-# p: the last idle point. fuel: each byte takes at most six rounds. Each value the next round
-# takes is bound first, so no round delays work into it.
-def dfab(fuel: Nat, +mode: U32, z: Dzb, ra: Array<U32> & U32, rt: Array<U32> & U32, sts: Array<Sk>, +keys: Trie<List<&2, Ix>>, +n: U32, +len: U32, +i: U32, +id: U32, +p: U32, +b: U32, +prog: Trie<Inst>, +cfuel: Nat, +wb: Bool, +am: Asc, +sets: List<&2, Inst>, +sk: Bool, +cap: U32) -> Array<U32> & Dr:
+# The rounds of dfab.
+type Db is Data:
+  DbRead{}     # read the byte b at i in state id
+  DbPrime{}    # prime DbRead at i
+  DbSkip{}     # skip from the idle state id at i
+  DbSkipped{}  # take the skip's offset
+  DbKind{}     # take the kind of the byte before i
+  DbLearn{}    # learn the step on the char at i
+  DbTake{}     # take the step learned, from z
+  DbEnd{}      # the end of the text
+  DbHit{}      # a match
+  DbFull{}     # a full cache
+
+# The DFA over the bytes of a, up to len; mode picks the round. A read hands back the array
+# beside the value, and a round may not take apart a computed value, so each round passes its
+# reads to the next: ra the buffer and, in DbRead, the byte after b; rt the table and, in
+# DbRead, its entry for id and b. p: the last idle point. fuel: each byte takes at most six
+# rounds. Each value the next round takes is bound first, so no round delays work into it.
+def dfab(fuel: Nat, +mode: Db, z: Dzb, ra: Array<U32> & U32, rt: Array<U32> & U32, sts: Array<Sk>, +keys: Trie<List<&2, Ix>>, +n: U32, +len: U32, +i: U32, +id: U32, +p: U32, +b: U32, +prog: Trie<Inst>, +cfuel: Nat, +wb: Bool, +am: Asc, +sets: List<&2, Inst>, +sk: Bool, +cap: U32) -> Array<U32> & Dr:
   match fuel:
     case 0n:
       (a, x) = ra
       (a, DFull{p})
     case 1n+f:
       match mode:
-        case 0:
+        case DbRead{}:
           (a, +wn) = ra
           (tab, +e) = rt
           +bn = byte.at(wn, (i + 1 : U32))
@@ -3463,10 +3481,10 @@ def dfab(fuel: Nat, +mode: U32, z: Dzb, ra: Array<U32> & U32, rt: Array<U32> & U
           +idle = adv && U32.is_le(id2, 2)
           +p2 = Bool.pick(U32, idle, i2, p)
           +far = sk && Bool.not(asc.has(bn, am))
-          +md = dfa.mode(id2, i2, len, far, 0)
+          +md = dfa.mode(id2, i2, len, far, DbRead{})
           +hit = ascii && U32.is_eq(e, 1)
-          +mh = Bool.pick(U32, hit, 5, 2)
-          +m = Bool.pick(U32, adv, md, mh)
+          +mh = Bool.pick(Db, hit, DbHit{}, DbLearn{})
+          +m = Bool.pick(Db, adv, md, mh)
           +b2 = Bool.pick(U32, adv, bn, b)
           +nx = (i2 + 1 : U32)
           +col = ((id2 * 128) + bn : U32)
@@ -3474,24 +3492,24 @@ def dfab(fuel: Nat, +mode: U32, z: Dzb, ra: Array<U32> & U32, rt: Array<U32> & U
           ra2 = Array.get(U32, a, (nx >> 2n : U32))
           rt2 = Array.get(U32, tab, idx)
           dfab(f, m, Dzb0{}, ra2, rt2, sts, keys, n, len, i2, id2, p2, b2, prog, cfuel, wb, am, sets, sk, cap)
-        case 1:
+        case DbSkip{}:
           (a, x) = ra
           ra2 = skip.wide(Nat.add(Nat.mul(2n, U32.to_nat((len - i : U32))), 4n), 1, skip.from(a, len, i, am), len, i, am, sets)
-          dfab(f, 9, Dzb0{}, ra2, rt, sts, keys, n, len, i, id, p, b, prog, cfuel, wb, am, sets, sk, cap)
-        case 2:
+          dfab(f, DbSkipped{}, Dzb0{}, ra2, rt, sts, keys, n, len, i, id, p, b, prog, cfuel, wb, am, sets, sk, cap)
+        case DbLearn{}:
           (a, x) = ra
           (tab, e) = rt
           z2 = {DzbL{dfab.learn(dec(a, len, i), Array.get(Sk, sts, id), tab, keys, n, id, prog, cfuel, wb, cap)} : Dzb}
           ra2 = {(Array.new(U32, 0n, 0), 0) : Array<U32> & U32}
           rt2 = {(Array.new(U32, 0n, 0), 0) : Array<U32> & U32}
           sts2 = Array.new(Sk, 0n, dk.key(0, Nil{}))
-          dfab(f, 7, z2, ra2, rt2, sts2, keys, n, len, i, id, p, b, prog, cfuel, wb, am, sets, sk, cap)
-        case 7:
+          dfab(f, DbTake{}, z2, ra2, rt2, sts2, keys, n, len, i, id, p, b, prog, cfuel, wb, am, sets, sk, cap)
+        case DbTake{}:
           match z:
             case DzbL{Dlb{a2, +w, Dl{t2, s2, +k2, +n2, +id2, +hit}}}:
               +i2 = (i + w : U32)
-              +md = dfa.mode(id2, i2, len, sk, 8)
-              +m = Bool.pick(U32, hit, 5, md)
+              +md = dfa.mode(id2, i2, len, sk, DbPrime{})
+              +m = Bool.pick(Db, hit, DbHit{}, md)
               +idle = U32.is_ne(id2, seed.id()) && U32.is_le(id2, 2)
               +p2 = Bool.pick(U32, idle, i2, p)
               ra2 = Array.get(U32, a2, (i2 >> 2n : U32))
@@ -3500,7 +3518,7 @@ def dfab(fuel: Nat, +mode: U32, z: Dzb, ra: Array<U32> & U32, rt: Array<U32> & U
             case Dzb0{}:
               (a, x) = ra
               (a, DFull{p})
-        case 8:
+        case DbPrime{}:
           (a, +w0) = ra
           (tab, e) = rt
           +bc = byte.at(w0, i)
@@ -3508,32 +3526,32 @@ def dfab(fuel: Nat, +mode: U32, z: Dzb, ra: Array<U32> & U32, rt: Array<U32> & U
           +idx = ((id * 128) + bc : U32)
           ra2 = Array.get(U32, a, (nx >> 2n : U32))
           rt2 = Array.get(U32, tab, idx)
-          dfab(f, 0, Dzb0{}, ra2, rt2, sts, keys, n, len, i, id, p, bc, prog, cfuel, wb, am, sets, sk, cap)
-        case 9:
+          dfab(f, DbRead{}, Dzb0{}, ra2, rt2, sts, keys, n, len, i, id, p, bc, prog, cfuel, wb, am, sets, sk, cap)
+        case DbSkipped{}:
           (a, +k) = ra
           +moved = U32.is_ne(k, i)
           +km = (k - 1 : U32)
           +at = Bool.pick(U32, moved, km, k)
-          +m = Bool.pick(U32, moved, 10, 8)
+          +m = Bool.pick(Db, moved, DbKind{}, DbPrime{})
           ra2 = Array.get(U32, a, (at >> 2n : U32))
           dfab(f, m, Dzb0{}, ra2, rt, sts, keys, n, len, k, id, p, b, prog, cfuel, wb, am, sets, sk, cap)
-        case 10:
+        case DbKind{}:
           (a, +w0) = ra
           +pb = byte.at(w0, (i - 1 : U32))
           +more = U32.is_lt(i, len)
-          +m = Bool.pick(U32, more, 8, 4)
+          +m = Bool.pick(Db, more, DbPrime{}, DbEnd{})
           +kw = dk.of(wb, pb)
           +low = U32.is_lt(pb, 128)
           +kd = Bool.pick(U32, low, kw, 1)
           ra2 = Array.get(U32, a, (i >> 2n : U32))
           dfab(f, m, Dzb0{}, ra2, rt, sts, keys, n, len, i, kd, i, b, prog, cfuel, wb, am, sets, sk, cap)
-        case 4:
+        case DbEnd{}:
           (a, x) = ra
           dfab.end(Array.get(Sk, sts, id), a, p, prog, cfuel)
-        case 5:
+        case DbHit{}:
           (a, x) = ra
           (a, DHit{p})
-        case _:
+        case DbFull{}:
           (a, x) = ra
           (a, DFull{p})
 
@@ -3544,7 +3562,7 @@ def dfab.init(r: Array<U32> & U32, +len: U32, +from: U32, +prog: Trie<Inst>, +cf
   +rest = (len - from : U32)
   +cap = dk.cap(rest)
   +sk = dk.sk(lead, asc)
-  dfab(Nat.add(Nat.mul(6n, U32.to_nat(rest)), 16n), dfa.mode(id, from, len, sk, 8), Dzb0{}, Array.get(U32, a, (from >> 2n : U32)), (Array.new(U32, dk.tab(rest), 0), 0), dk.sts(dk.depth(rest)), dk.keys(cap), 3, len, from, id, from, 0, prog, cfuel, wb, asc.or(asc), lead.sets(lead), sk, cap)
+  dfab(Nat.add(Nat.mul(6n, U32.to_nat(rest)), 16n), dfa.mode(id, from, len, sk, DbPrime{}), Dzb0{}, Array.get(U32, a, (from >> 2n : U32)), (Array.new(U32, dk.tab(rest), 0), 0), dk.sts(dk.depth(rest)), dk.keys(cap), 3, len, from, id, from, 0, prog, cfuel, wb, asc.or(asc), lead.sets(lead), sk, cap)
 
 def exec.bytes.hit(any: Bool, a: Array<U32>, +len: U32, +p: U32, +plain: Bool, +prog: Trie<Inst>, +fuel: Nat, +init: List<&2, Maybe<&2, U32>>, +start: Maybe<&2, List<&2, Inst>>, +asc: Maybe<&2, Asc>, +slots: Nat) -> Array<U32> & Maybe<&2, List<&2, Maybe<&2, U32>>>:
   match any:
