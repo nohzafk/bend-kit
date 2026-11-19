@@ -3,10 +3,10 @@
 Dependency plans for builds and task graphs. `plan` gives the dependency closure of the requested targets in an order where every prerequisite comes first, or says which node is missing or which cycle blocks the plan. `invalidate` finds what an input change makes stale, and `exec` decides which nodes run, which are reused, and which are skipped. `build` runs real commands on top of them. `LAWS.bend` states these properties for every graph, and `PROOF.bend` proves them.
 
 ```bend
-import bend-kit-planner@0.4.0.0/planner.bend as P
+import bend-kit-planner@0.4.1.0/planner.bend as P
 ```
 
-It imports `bend-kit-bytes@0.3.3.0`, `bend-kit-hash@0.3.0.4`, `bend-kit-files@0.3.1.0`, and `bend-kit-process@0.5.0.1`.
+It imports `bend-kit-bytes@0.3.3.0`, `bend-kit-hash@0.3.0.4`, `bend-kit-files@0.3.1.0`, `bend-kit-process@0.5.0.1`, and `bend-kit-collections@0.1.5.0`.
 
 ## Example
 
@@ -14,7 +14,7 @@ Build `app` from `lib`. A second build reuses both; a change to `lib.c` rebuilds
 
 ```bend
 import Base
-import bend-kit-planner@0.4.0.0/planner.bend as P
+import bend-kit-planner@0.4.1.0/planner.bend as P
 
 def tasks() -> List<&2, P.Task>:
   [P.Task{"app", ["lib"], ["cc", "-o", "app", "main.c", "lib.o"], ["main.c"]},
@@ -64,7 +64,9 @@ Import `planner.bend` as `P`. The pure functions take `~K` and `~eq` as template
 | def | result |
 |---|---|
 | `plan(g, ts)` | `Done{p}`: the closure of `ts` in dependency order, each node once; or `Fail{e}` |
+| `plan.fast(~cmp, g, ts)` | the same answer as `plan`, with sets and the graph in ordered maps keyed by `cmp` |
 | `invalidate(p, g, changed)` | the stale nodes of `p`, latest first |
+| `invalidate.fast(~cmp, p, g, changed)` | the same answer as `invalidate`, with indexed lookups |
 | `decide(g, stale, st, x)` | `Run{}`, `Mark{status}`, or `Pass{}` for node `x` in state `st` |
 | `step(a, st, x, rs)` | `st` after action `a`; a `Run` takes its result from the head of `rs` |
 | `exec(p, g, stale, st, rs)` | the state after each node of `p`, newest first; `rs` holds the command results in order |
@@ -114,6 +116,7 @@ The build layer fixes `K` to `String`.
 | `plan_missing`, `plan_missing_chain` | a reported missing node is undefined, and its chain runs from a target through nodes that each require the next |
 | `plan_cycle_path` | a reported cycle is a cycle: each node requires the next, and the last is the first |
 | `plan_complete` | `plan` never gives `Refused{}`. So it fails only for a true missing node or a true cycle, and it plans every other graph |
+| `plan_index`, `stale_index` | for a total order `cmp` that agrees with `eq`, `plan.fast` equals `plan` and `invalidate.fast` equals `invalidate` |
 | `stale_changed`, `stale_dependents` | a changed node of `p` is stale, and so is every node of a plan that requires a stale node |
 | `stale_least` | every set that holds each node of `p` that changed or requires a member holds every stale node; so invalidation is minimal |
 | `exec_ready` | a node that ran or was reused had every prerequisite `Built` or `Fresh` |
@@ -143,7 +146,8 @@ The proofs cover the pure core. They do not cover hashing, the disk, or the comm
 
 ## Limits
 
-- `plan`, `invalidate`, and `exec` keep sets in lists and look up prerequisites in the node list, so a plan of n nodes takes O(n²) comparisons. A plan of 1,000 nodes takes about 120 ms. See [bench/README.md](bench/README.md).
+- `plan.fast` and `invalidate.fast` take O(n log n) comparisons, and `build` uses them. A plan of 1,000 nodes takes about 7 ms. See [bench/README.md](bench/README.md).
+- `plan` and `invalidate` are the list models that the laws speak about. They take O(n²) comparisons. `exec` and the parallel runner still look up prerequisites and states in lists, so a build of n tasks takes O(n²) comparisons outside the plan.
 - A task id is printable ASCII and not empty, because the stamps file holds one id per line.
 
 ## Bench

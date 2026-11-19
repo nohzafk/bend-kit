@@ -2,6 +2,7 @@
 import Base
 import ../../time/time.bend as Time
 import ../planner.bend as P
+import bend-kit-collections@0.1.5.0/order.bend as Order
 
 def id(+i: U32) -> String:
   "n" ++ U32.show(i)
@@ -49,7 +50,7 @@ def rounds(k: Nat, +g: List<&2, P.Node<String>>, acc: U32) -> U32:
     case 0n:
       acc
     case 1n+m:
-      rounds(m, g, (acc + check(P.plan(~String, ~String.eq, g, ["n0"])) : U32))
+      rounds(m, g, (acc + check(P.plan.fast(~String, ~String.eq, ~Order.string, g, ["n0"])) : U32))
 
 def arg(args: List<&1, String>) -> U32:
   match args:
