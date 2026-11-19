@@ -1,0 +1,136 @@
+# planner
+
+Dependency plans for builds and task graphs. `plan` gives the dependency closure of the requested targets in an order where every prerequisite comes first, or says which node is missing or which cycle blocks the plan. `invalidate` finds what an input change makes stale, and `exec` decides which nodes run, which are reused, and which are skipped. `build` runs real commands on top of them. `LAWS.bend` states these properties for every graph, and `PROOF.bend` proves them.
+
+```bend
+import bend-kit-planner@0.1.0.0/planner.bend as P
+```
+
+It imports `bend-kit-bytes@0.3.3.0`, `bend-kit-hash@0.3.0.4`, `bend-kit-files@0.3.1.0`, and `bend-kit-process@0.5.0.1`.
+
+## Example
+
+Build `app` from `lib`. A second build reuses both; a change to `lib.c` rebuilds `lib` and then `app`.
+
+```bend
+import Base
+import bend-kit-planner@0.1.0.0/planner.bend as P
+
+def tasks() -> List<&2, P.Task>:
+  [P.Task{"app", ["lib"], ["cc", "-o", "app", "main.c", "lib.o"], ["main.c"]},
+   P.Task{"lib", [], ["cc", "-c", "lib.c"], ["lib.c"]}]
+
+def show(es: List<&2, P.Entry<String>>) -> IO(Unit):
+  match es:
+    case Nil{}:
+      IO.pure(Unit, Unit{})
+    case Con{P.Entry{x, s}, t}:
+      do IO<Unit>:
+        IO.print(x ++ " " ++ P.Status.show(s))
+        show(t)
+
+def main() -> IO(Unit):
+  do IO<Unit>:
+    es : List<&2, P.Entry<String>> <- IO.try(List<&2, P.Entry<String>>, P.build(tasks(), ["app"], ".", ".planner-stamps"))
+    show(es)
+```
+
+The first run prints `lib built` and `app built`; the second prints `lib fresh` and `app fresh`. [check.bend](check.bend) runs a diamond of shell commands through a first build, a reuse, an input change, a failed command, a cycle, and a missing node, and checks the order and the count of runs from a log the commands write.
+
+## Model
+
+The pure core is generic. A node id has any `Data` type `K` with an equality test `eq: K -> K -> Bool`.
+
+| type | values |
+|---|---|
+| `Node<K>` | `Node{id, deps}`: a node and the nodes it requires |
+| graph | `List<&2, Node<K>>`; when two nodes share an id, the first one counts |
+| `Error<K>` | `Missing{node, chain}`, `Cycle{path}`, or `Refused{}` |
+| `Status` | `Built{}`, `Fresh{}`, `Failed{}`, or `Skipped{}` |
+| `Entry<K>` | `Entry{node, status}` |
+
+**Inclusion rule.** The plan holds the targets and, for each node it holds, every prerequisite. It holds nothing else.
+
+**Prerequisites must succeed.** A node runs, or is reused, only when each of its prerequisites ended `Built` or `Fresh`. Otherwise the node is `Skipped` and its command does not run. An undefined node is also `Skipped`.
+
+**Stale nodes.** A node is stale when it changed, or when it requires a stale node. `exec` runs a stale node and reuses a node that is not stale. So a change reruns the changed node and everything downstream of it, and nothing else.
+
+`plan` builds a candidate with a depth-first walk and then checks it. The check confirms that each node is defined, comes once, and comes after all its prerequisites; that each node is a target or a prerequisite of a later node; and that each target is in the plan. A candidate that fails the check gives `Refused{}`, which is a planner bug. The laws follow from the check, so they hold for every graph.
+
+## API
+
+Import `planner.bend` as `P`. The pure functions take `~K` and `~eq` as templates, as in `P.plan(~String, ~String.eq, g, ts)`.
+
+| def | result |
+|---|---|
+| `plan(g, ts)` | `Done{p}`: the closure of `ts` in dependency order, each node once; or `Fail{e}` |
+| `invalidate(p, g, changed)` | the stale nodes of `p`, latest first |
+| `decide(g, stale, st, x)` | `Run{}`, `Mark{status}`, or `Pass{}` for node `x` in state `st` |
+| `step(a, st, x, rs)` | `st` after action `a`; a `Run` takes its result from the head of `rs` |
+| `exec(p, g, stale, st, rs)` | the state after each node of `p`, newest first; `rs` holds the command results in order |
+| `status(st, x)` | `Maybe`: the status of `x` |
+| `deps(g, x)` | `Maybe`: the prerequisites of `x`; `None` when `x` is undefined |
+| `member(xs, x)`, `all_in(xs, ys)`, `any_in(xs, ys)`, `distinct(xs)` | the list tests the laws use |
+
+`Error<K>`:
+
+| error | meaning |
+|---|---|
+| `Missing{node, chain}` | `node` is undefined; `chain` runs from a target to the node that names it |
+| `Cycle{path}` | each node of `path` requires the next, and the last is the first, as in `["a", "b", "a"]` |
+| `Refused{}` | the candidate failed the check; a planner bug |
+
+The build layer fixes `K` to `String`.
+
+| def | result |
+|---|---|
+| `Task{id, deps, argv, inputs}` | a node with its command and the source files it reads; an empty `argv` is a group with no command |
+| `build(tasks, targets, dir, path)` | `Run`: each planned node with its status, in plan order. It plans `targets`, hashes each task, runs the stale tasks in `dir` in plan order, reuses the rest, and writes the stamps to `path` |
+| `Error.show(e)`, `Status.show(s)` | text for an error or a status |
+
+`build` runs each command with `process` in `dir`, with no shell, no stdin, and the inherited environment. Exit status 0 is `Built`; any other status, or a failure to start, is `Failed`. Paths in `inputs` are relative to `dir`. `build` fails, and runs nothing, when a task id is empty or not printable ASCII, or when `plan` fails.
+
+## Laws
+
+`LAWS.bend` states these for every node type, graph, target list, change set, and sequence of command results. `PROOF.bend` proves them.
+
+| law | claim |
+|---|---|
+| `plan_defined` | every node of a plan is defined |
+| `plan_before` | each prerequisite of a node comes before it |
+| `plan_once` | no node comes twice |
+| `plan_targets`, `plan_closed` | the plan holds every target, and every prerequisite of a node it holds |
+| `plan_least` | every set that holds the targets and the prerequisites of its members holds the plan; so the plan is exactly the closure |
+| `plan_cycle`, `plan_cycle_target` | no plan holds a node of a set whose every member requires a member, such as a cycle; so a target on a cycle has no plan |
+| `stale_changed`, `stale_dependents` | a changed node of `p` is stale, and so is every node of a plan that requires a stale node |
+| `stale_least` | every set that holds each node of `p` that changed or requires a member holds every stale node; so invalidation is minimal |
+| `exec_ready` | a node that ran or was reused had every prerequisite `Built` or `Fresh` |
+| `exec_blocked` | a prerequisite that did not succeed keeps its dependents from success |
+| `exec_once` | each node gets at most one status, so its command runs at most once |
+| `exec_total` | each node of `p` gets a status |
+| `exec_fresh` | a stale node is never reused |
+
+Every law takes `eq` as sound: `eq(x, y)` gives `x == y`. `String.eq` is. The `exec_` laws hold for any node list, not only a plan. The fixture laws check the same functions on a diamond, a cycle, and a missing node.
+
+## Trust boundary
+
+The proofs cover the pure core. They do not cover hashing, the disk, or the commands.
+
+- **Completeness of planning.** The laws say what a plan holds when `plan` succeeds. No law says that `plan` succeeds on every acyclic graph with no missing node; `check.bend` and the fixtures test it.
+- **Declared dependencies.** Reuse is safe only when each task declares every task whose output it reads, and lists every source file it reads in `inputs`. A read that the declarations miss is not tracked.
+- **Inputs are sources.** `build` hashes all inputs before it runs a command. List only files that no task writes; an edge to the task that writes a file covers that file.
+- **Commands.** A command that exits 0 is taken to have written its outputs. `build` does not check them, and it does not sandbox the command.
+- **Hashing.** A stamp is xxHash64 over the argv, the prerequisite ids, and each input path and its octets. xxHash64 is not cryptographic: two inputs with one hash can make a stale task look fresh. Do not reuse outputs across a trust boundary on these stamps.
+- **The run loop.** `build` repeats the shape of `exec` in `IO`: it uses `decide` and `step` for each node and takes each `Run` result from the command. The laws cover `exec`.
+- **Stamps file.** `build` writes the stamps through `path.tmp` and a rename, so a reader sees the old file or the new one. A crash before the rename keeps the old stamps, so the next build reruns what the lost build ran. An unreadable stamps file counts as empty. Two builds that share a stamps file must not run at once.
+
+## Limits
+
+- `plan`, `invalidate`, and `exec` keep sets in lists and look up prerequisites in the node list, so a plan of n nodes takes O(n²) comparisons. A plan of 1,000 nodes takes about 120 ms. See [bench/README.md](bench/README.md).
+- `build` runs one command at a time.
+- `build` drops command output. A failed task shows as `Failed`; rerun its command to see why.
+- A task id is printable ASCII and not empty, because the stamps file holds one id per line.
+
+## Bench
+
+`bench/` times a plan of a 1,000-node graph against `petgraph`, `graphlib`, and `toposort` in Rust, Python, and JavaScript. See [bench/README.md](bench/README.md).
