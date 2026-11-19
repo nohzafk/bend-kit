@@ -23,14 +23,32 @@ def tasks(+gen: List<&2, String>) -> List<&2, P.Task>:
 def GEN() -> List<&2, String>:
   sh("gen", "cat base.out gen.txt > gen.out")
 
-def shown(es: List<&2, P.Entry<String>>) -> String:
+# A failed command shows its exit code, stdout, and stderr.
+def ran(s: P.Status, r: Maybe<&2, P.Ran>) -> String:
+  match s r:
+    case P.Failed{} Some{P.Exited{code, out, err}}:
+      "[" ++ U32.show(code) ++ " out=" ++ out ++ " err=" ++ err ++ "]"
+    case P.Failed{} Some{P.Unstarted{e}}:
+      "[unstarted]"
+    case _ _:
+      ""
+
+def shown(es: List<&2, P.Outcome>) -> String:
   match es:
     case Nil{}:
       ""
-    case Con{P.Entry{x, s}, Nil{}}:
-      x ++ ":" ++ P.Status.show(s)
-    case Con{P.Entry{x, s}, t}:
-      x ++ ":" ++ P.Status.show(s) ++ " " ++ shown(t)
+    case Con{P.Outcome{x, +s, r}, Nil{}}:
+      x ++ ":" ++ P.Status.show(s) ++ ran(s, r)
+    case Con{P.Outcome{x, +s, r}, t}:
+      x ++ ":" ++ P.Status.show(s) ++ ran(s, r) ++ " " ++ shown(t)
+
+def unstarted(r: Result<&1, &1, U32 & String, List<&2, P.Outcome>>) -> IO(Unit):
+  match r:
+    case Done{es}:
+      +got : String = shown(es)
+      ok(String.starts_with(got, "x:failed["), "a command that does not start fails: " ++ got)
+    case Fail{(code, msg)}:
+      IO.die(Unit, 1, "bad unstarted: " ++ msg)
 
 def write(+path: String, +text: String) -> IO(Unit):
   do IO<Unit>:
@@ -53,7 +71,7 @@ def read(+path: String) -> IO(String):
 
 def build(+dir: String, +gen: List<&2, String>, +targets: List<&2, String>, +want: String, +name: String) -> IO(Unit):
   do IO<Unit>:
-    es : List<&2, P.Entry<String>> <- IO.try(List<&2, P.Entry<String>>, P.build(tasks(gen), targets, dir, dir ++ "/stamps"))
+    es : List<&2, P.Outcome> <- IO.try(List<&2, P.Outcome>, P.build(tasks(gen), targets, dir, dir ++ "/stamps"))
     +got : String = shown(es)
     ok(String.eq(got, want), name ++ ": " ++ got)
 
@@ -62,7 +80,7 @@ def log(+dir: String, +want: String, +name: String) -> IO(Unit):
     +got : String <- read(dir ++ "/log")
     ok(String.eq(got, want), name)
 
-def refused(r: Result<&1, &1, U32 & String, List<&2, P.Entry<String>>>, +want: String, +name: String) -> IO(Unit):
+def refused(r: Result<&1, &1, U32 & String, List<&2, P.Outcome>>, +want: String, +name: String) -> IO(Unit):
   match r:
     case Done{es}:
       IO.die(Unit, 1, "bad " ++ name ++ ": planned " ++ shown(es))
@@ -83,12 +101,15 @@ def main() -> IO(Unit):
     write(dir ++ "/gen.txt", "gen 2\n")
     build(dir, GEN(), ["app"], "base:fresh lib:fresh gen:built app:built", "a changed input reruns its task and its dependents")
     log(dir, "base\nlib\ngen\napp\ngen\napp\n", "only the stale tasks ran")
-    build(dir, sh("gen", "exit 3"), ["app"], "base:fresh lib:fresh gen:failed app:skipped", "a failed command skips its dependents")
+    build(dir, sh("gen", "echo boom >&2; exit 3"), ["app"], "base:fresh lib:fresh gen:failed[3 out= err=boom\n] app:skipped", "a failed command skips its dependents and keeps its output")
+    r0 : Result<&1, &1, U32 & String, List<&2, P.Outcome>> <-
+      P.build([P.Task{"x", [], ["/nonexistent/tool"], []}], ["x"], dir, dir ++ "/stamps3")
+    unstarted(r0)
     build(dir, GEN(), ["app"], "base:fresh lib:fresh gen:built app:built", "a failed task and its dependents run again")
-    r1 : Result<&1, &1, U32 & String, List<&2, P.Entry<String>>> <-
+    r1 : Result<&1, &1, U32 & String, List<&2, P.Outcome>> <-
       P.build([P.Task{"a", ["b"], [], []}, P.Task{"b", ["c"], [], []}, P.Task{"c", ["a"], [], []}], ["a"], dir, dir ++ "/stamps2")
     refused(r1, "cycle: a -> b -> c -> a", "a cycle has no plan")
-    r2 : Result<&1, &1, U32 & String, List<&2, P.Entry<String>>> <-
+    r2 : Result<&1, &1, U32 & String, List<&2, P.Outcome>> <-
       P.build([P.Task{"a", ["b"], [], []}, P.Task{"b", ["nope"], [], []}], ["a"], dir, dir ++ "/stamps2")
     refused(r2, "missing node nope, required by a -> b", "a missing node has no plan")
     log(dir, "base\nlib\ngen\napp\ngen\napp\ngen\ngen\napp\n", "a refused plan runs nothing")

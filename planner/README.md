@@ -3,7 +3,7 @@
 Dependency plans for builds and task graphs. `plan` gives the dependency closure of the requested targets in an order where every prerequisite comes first, or says which node is missing or which cycle blocks the plan. `invalidate` finds what an input change makes stale, and `exec` decides which nodes run, which are reused, and which are skipped. `build` runs real commands on top of them. `LAWS.bend` states these properties for every graph, and `PROOF.bend` proves them.
 
 ```bend
-import bend-kit-planner@0.1.0.0/planner.bend as P
+import bend-kit-planner@0.2.0.0/planner.bend as P
 ```
 
 It imports `bend-kit-bytes@0.3.3.0`, `bend-kit-hash@0.3.0.4`, `bend-kit-files@0.3.1.0`, and `bend-kit-process@0.5.0.1`.
@@ -14,24 +14,24 @@ Build `app` from `lib`. A second build reuses both; a change to `lib.c` rebuilds
 
 ```bend
 import Base
-import bend-kit-planner@0.1.0.0/planner.bend as P
+import bend-kit-planner@0.2.0.0/planner.bend as P
 
 def tasks() -> List<&2, P.Task>:
   [P.Task{"app", ["lib"], ["cc", "-o", "app", "main.c", "lib.o"], ["main.c"]},
    P.Task{"lib", [], ["cc", "-c", "lib.c"], ["lib.c"]}]
 
-def show(es: List<&2, P.Entry<String>>) -> IO(Unit):
+def show(es: List<&2, P.Outcome>) -> IO(Unit):
   match es:
     case Nil{}:
       IO.pure(Unit, Unit{})
-    case Con{P.Entry{x, s}, t}:
+    case Con{P.Outcome{x, s, r}, t}:
       do IO<Unit>:
         IO.print(x ++ " " ++ P.Status.show(s))
         show(t)
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    es : List<&2, P.Entry<String>> <- IO.try(List<&2, P.Entry<String>>, P.build(tasks(), ["app"], ".", ".planner-stamps"))
+    es : List<&2, P.Outcome> <- IO.try(List<&2, P.Outcome>, P.build(tasks(), ["app"], ".", ".planner-stamps"))
     show(es)
 ```
 
@@ -85,7 +85,8 @@ The build layer fixes `K` to `String`.
 | def | result |
 |---|---|
 | `Task{id, deps, argv, inputs}` | a node with its command and the source files it reads; an empty `argv` is a group with no command |
-| `build(tasks, targets, dir, path)` | `Run`: each planned node with its status, in plan order. It plans `targets`, hashes each task, runs the stale tasks in `dir` in plan order, reuses the rest, and writes the stamps to `path` |
+| `build(tasks, targets, dir, path)` | `Run`: an `Outcome{node, status, ran}` for each planned node, in plan order. It plans `targets`, hashes each task, runs the stale tasks in `dir` in plan order, reuses the rest, and writes the stamps to `path` |
+| `Ran` | what a command left: `Exited{code, out, err}`, with the last 4096 octets of stdout and stderr as byte strings, or `Unstarted{error}`. `ran` is `None` when no command ran: the node was reused, skipped, or a group |
 | `Error.show(e)`, `Status.show(s)` | text for an error or a status |
 
 `build` runs each command with `process` in `dir`, with no shell, no stdin, and the inherited environment. Exit status 0 is `Built`; any other status, or a failure to start, is `Failed`. Paths in `inputs` are relative to `dir`. `build` fails, and runs nothing, when a task id is empty or not printable ASCII, or when `plan` fails.
@@ -128,7 +129,6 @@ The proofs cover the pure core. They do not cover hashing, the disk, or the comm
 
 - `plan`, `invalidate`, and `exec` keep sets in lists and look up prerequisites in the node list, so a plan of n nodes takes O(n²) comparisons. A plan of 1,000 nodes takes about 120 ms. See [bench/README.md](bench/README.md).
 - `build` runs one command at a time.
-- `build` drops command output. A failed task shows as `Failed`; rerun its command to see why.
 - A task id is printable ASCII and not empty, because the stamps file holds one id per line.
 
 ## Bench

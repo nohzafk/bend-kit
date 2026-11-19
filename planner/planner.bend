@@ -675,28 +675,76 @@ def stamps.write(+path: String, xs: List<&2, Stamp>) -> Run(Unit):
     stamps.closed(r)
     Files.rename(tmp, path)
 
-def run.ok(r: Result<&1, &1, U32 & String, U32 & Bytes.Bytes & Bytes.Bytes>) -> Bool:
-  match r:
-    case Fail{e}:
-      False{}
-    case Done{(code, out)}:
-      U32.is_eq(code, 0)
+# What a command left: its exit code and the last 4096 octets of its stdout and stderr, or why it did not start.
+type Ran is Data:
+  Exited{code: U32, out: String, err: String}
+  Unstarted{error: String}
 
-def run.argv(argv: List<&2, String>, dir: String) -> IO(Bool):
+type Log is Data:
+  Log{node: String, ran: Ran}
+
+# A planned node, its status, and what its command left; None when no command ran.
+type Outcome is Data:
+  Outcome{node: String, status: Status, ran: Maybe<&2, Ran>}
+
+type Ledger is Data:
+  Ledger{st: List<&2, Entry<String>>, logs: List<&2, Log>}
+
+def Ran.ok(r: Ran) -> Bool:
+  match r:
+    case Exited{code, o, e}:
+      U32.is_eq(code, 0)
+    case Unstarted{e}:
+      False{}
+
+def tail.of(r: Bytes.Bytes & Bytes.Bytes) -> String:
+  match r:
+    case (b, t):
+      Bytes.to_string(t)
+
+# The last 4096 octets of b, one Char per octet.
+def tail(b: Bytes.Bytes) -> String:
+  Bytes.Bytes{+len, buf} = b
+  +n = U32.min(len, 4096)
+  tail.of(Bytes.slice(Bytes.Bytes{len, buf}, (len - n : U32), n))
+
+def run.ran(r: Result<&1, &1, U32 & String, U32 & Bytes.Bytes & Bytes.Bytes>) -> Ran:
+  match r:
+    case Fail{(code, msg)}:
+      Unstarted{msg}
+    case Done{(code, (out, err))}:
+      Exited{code, tail(out), tail(err)}
+
+# Runs argv in dir; None for a group with no command.
+def run.argv(argv: List<&2, String>, dir: String) -> IO(Maybe<&2, Ran>):
   match argv:
     case Nil{}:
-      IO.pure(Bool, True{})
+      IO.pure(Maybe<&2, Ran>, None{})
     case Con{cmd, args}:
-      IO.bind(Result<&1, &1, U32 & String, U32 & Bytes.Bytes & Bytes.Bytes>, Bool, Proc.run(cmd, args, Nil{}, dir, Bytes.new(0)),
-        r => IO.pure(Bool, run.ok(r)))
+      IO.bind(Result<&1, &1, U32 & String, U32 & Bytes.Bytes & Bytes.Bytes>, Maybe<&2, Ran>, Proc.run(cmd, args, Nil{}, dir, Bytes.new(0)),
+        r => IO.pure(Maybe<&2, Ran>, Some{run.ran(r)}))
 
-# Runs the task's command in dir; True when it exits 0.
-def run.task(dir: String, m: Maybe<&2, Task>) -> IO(Bool):
+def run.task(dir: String, m: Maybe<&2, Task>) -> IO(Maybe<&2, Ran>):
   match m:
     case None{}:
-      IO.pure(Bool, False{})
+      IO.pure(Maybe<&2, Ran>, Some{Unstarted{"undefined task"}})
     case Some{Task{id, ds, argv, ins}}:
       run.argv(argv, dir)
+
+# A group succeeds; a command succeeds when it exits 0.
+def run.ok(m: Maybe<&2, Ran>) -> Bool:
+  match m:
+    case None{}:
+      True{}
+    case Some{r}:
+      Ran.ok(r)
+
+def run.log(+x: String, m: Maybe<&2, Ran>, logs: List<&2, Log>) -> List<&2, Log>:
+  match m:
+    case None{}:
+      logs
+    case Some{r}:
+      Log{x, r} <> logs
 
 def act(-R: Type, a: Action, run: Unit -> R, other: Unit -> R) -> R:
   match a:
@@ -708,17 +756,31 @@ def act(-R: Type, a: Action, run: Unit -> R, other: Unit -> R) -> R:
 # exec, with each Run's result from the task's command.
 def run.loop(
   p: List<&2, String>, +ts: List<&2, Task>, +g: List<&2, Node<String>>, +stale: List<&2, String>,
-  +st: List<&2, Entry<String>>, +dir: String
-) -> IO(List<&2, Entry<String>>):
+  +st: List<&2, Entry<String>>, +logs: List<&2, Log>, +dir: String
+) -> IO(Ledger):
   match p:
     case Nil{}:
-      IO.pure(List<&2, Entry<String>>, st)
+      IO.pure(Ledger, Ledger{st, logs})
     case Con{+x, +t}:
       +a = decide(~String, ~String.eq, g, stale, st, x)
-      act(IO(List<&2, Entry<String>>), a,
-        u => IO.bind(Bool, List<&2, Entry<String>>, run.task(dir, task(ts, x)),
-          ok => run.loop(t, ts, g, stale, step(String, Run{}, st, x, [ok]), dir)),
-        u => run.loop(t, ts, g, stale, step(String, a, st, x, Nil{}), dir))
+      act(IO(Ledger), a,
+        u => IO.bind(Maybe<&2, Ran>, Ledger, run.task(dir, task(ts, x)),
+          +m => run.loop(t, ts, g, stale, step(String, Run{}, st, x, [run.ok(m)]), run.log(x, m, logs), dir)),
+        u => run.loop(t, ts, g, stale, step(String, a, st, x, Nil{}), logs, dir))
+
+def ran.find(logs: List<&2, Log>, +k: String) -> Maybe<&2, Ran>:
+  match logs:
+    case Nil{}:
+      None{}
+    case Con{Log{+x, +r}, t}:
+      when(Maybe<&2, Ran>, u => ran.find(t, k), String.eq(k, x), Some{r})
+
+def outcomes(st: List<&2, Entry<String>>, +logs: List<&2, Log>, acc: List<&2, Outcome>) -> List<&2, Outcome>:
+  match st:
+    case Nil{}:
+      acc
+    case Con{Entry{+x, s}, t}:
+      outcomes(t, logs, Outcome{x, s, ran.find(logs, x)} <> acc)
 
 def build.ids(m: Maybe<&2, String>) -> Run(Unit):
   match m:
@@ -734,16 +796,22 @@ def build.plan(r: Result<&2, &2, Error<String>, List<&2, String>>) -> Run(List<&
     case Done{p}:
       Run.pure(List<&2, String>, p)
 
+def build.done(+path: String, +now: List<&2, Stamp>, old: List<&2, Stamp>, l: Ledger) -> Run(List<&2, Outcome>):
+  match l:
+    case Ledger{+st, logs}:
+      do Run<List<&2, Outcome>>:
+        stamps.write(path, after(st, now, old))
+        return outcomes(st, logs, Nil{})
+
 # Plans targets, runs each stale task in dir, reuses the rest, and records stamps in path.
-# The result is each planned node with its status, in plan order.
-def build(+tasks: List<&2, Task>, +targets: List<&2, String>, +dir: String, +path: String) -> Run(List<&2, Entry<String>>):
+# The result is each planned node with its status and command output, in plan order.
+def build(+tasks: List<&2, Task>, +targets: List<&2, String>, +dir: String, +path: String) -> Run(List<&2, Outcome>):
   +g = graph(tasks)
-  do Run<List<&2, Entry<String>>>:
+  do Run<List<&2, Outcome>>:
     build.ids(ids.bad(tasks))
     +p : List<&2, String> <- build.plan(plan(~String, ~String.eq, g, targets))
     +old : List<&2, Stamp> <- Run.lift(List<&2, Stamp>, stamps.read(path))
     +now : List<&2, Stamp> <- Run.lift(List<&2, Stamp>, stamps.now(p, tasks, dir, Nil{}))
     +stale : List<&2, String> = invalidate(~String, ~String.eq, p, g, changed(p, old, now))
-    +st : List<&2, Entry<String>> <- Run.lift(List<&2, Entry<String>>, run.loop(p, tasks, g, stale, Nil{}, dir))
-    stamps.write(path, after(st, now, old))
-    return rev(Entry<String>, st, Nil{})
+    l : Ledger <- Run.lift(Ledger, run.loop(p, tasks, g, stale, Nil{}, Nil{}, dir))
+    build.done(path, now, old, l)
