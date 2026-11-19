@@ -383,6 +383,154 @@ def keys(-K: Data, st: List<&2, Entry<K>>) -> List<&2, K>:
     case Con{Entry{x, s}, t}:
       x <> keys(K, t)
 
+# Parallel execution
+# ------------------
+
+# a <= b.
+def le(a: Nat, b: Nat) -> Bool:
+  match a b:
+    case 0n _:
+      True{}
+    case 1n+p 0n:
+      False{}
+    case 1n+p 1n+q:
+      le(p, q)
+
+# The statuses so far, the nodes whose commands run now, and every node started, latest first.
+type Pool<-K: Data> is Data:
+  Pool{st: List<&2, Entry<K>>, running: List<&2, K>, log: List<&2, K>}
+
+# A command finished: its node, and whether it exited 0.
+type Fin<-K: Data> is Data:
+  Fin{node: K, ok: Bool}
+
+type Step is Data:
+  # The node has a status or is running.
+  PSkip{}
+  # Record this status without a run.
+  PMark{status: Status}
+  # Start the command.
+  PStart{}
+  # Wait for a running command to finish: a prerequisite runs, or every slot is busy.
+  PWait{}
+
+# xs without the nodes eq to y.
+def drop(~K: Data, ~eq: K -> K -> Bool, xs: List<&2, K>, +y: K) -> List<&2, K>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case Con{+z, t}:
+      invalidate.if(K, Bool.not(eq(y, z)), z, drop(~K, ~eq, t, y))
+
+def Fin.status(ok: Bool) -> Status:
+  match ok:
+    case True{}:
+      Built{}
+    case False{}:
+      Failed{}
+
+def finish.if(-K: Data, run: Bool, +y: K, ok: Bool, st: List<&2, Entry<K>>, running: List<&2, K>, dropped: List<&2, K>, log: List<&2, K>) -> Pool<K>:
+  match run:
+    case True{}:
+      Pool{Entry{y, Fin.status(ok)} <> st, dropped, log}
+    case False{}:
+      Pool{st, running, log}
+
+# The pool after e; a finish for a node that does not run changes nothing.
+def finish(~K: Data, ~eq: K -> K -> Bool, pool: Pool<K>, e: Fin<K>) -> Pool<K>:
+  match pool e:
+    case Pool{st, +running, log} Fin{+y, ok}:
+      finish.if(K, member(~K, ~eq, running, y), y, ok, st, running, drop(~K, ~eq, running, y), log)
+
+def decide.par.room(room: Bool) -> Step:
+  match room:
+    case True{}:
+      PStart{}
+    case False{}:
+      PWait{}
+
+def decide.par.go(go: Bool, stale: Bool, room: Bool) -> Step:
+  match go:
+    case False{}:
+      PMark{Skipped{}}
+    case True{}:
+      match stale:
+        case False{}:
+          PMark{Fresh{}}
+        case True{}:
+          decide.par.room(room)
+
+def decide.par.wait(busy: Bool, go: Bool, stale: Bool, room: Bool) -> Step:
+  match busy:
+    case True{}:
+      PWait{}
+    case False{}:
+      decide.par.go(go, stale, room)
+
+def decide.par.node(~K: Data, ~eq: K -> K -> Bool, m: Maybe<&2, List<&2, K>>, +st: List<&2, Entry<K>>, +running: List<&2, K>, stale: Bool, room: Bool) -> Step:
+  match m:
+    case None{}:
+      PMark{Skipped{}}
+    case Some{+ds}:
+      decide.par.wait(any_in(~K, ~eq, ds, running), ready(~K, ~eq, ds, st), stale, room)
+
+def decide.par.seen(~K: Data, ~eq: K -> K -> Bool, seen: Bool, +g: List<&2, Node<K>>, +stale: List<&2, K>, +limit: Nat, +st: List<&2, Entry<K>>, +running: List<&2, K>, +x: K) -> Step:
+  match seen:
+    case True{}:
+      PSkip{}
+    case False{}:
+      decide.par.node(~K, ~eq, deps(~K, ~eq, g, x), st, running, member(~K, ~eq, stale, x),
+        le(1n+List.length(&2, K, running), limit))
+
+# What to do with x in a parallel run.
+def decide.par(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, Node<K>>, +stale: List<&2, K>, +limit: Nat, pool: Pool<K>, +x: K) -> Step:
+  match pool:
+    case Pool{+st, +running, log}:
+      decide.par.seen(~K, ~eq, Bool.or(Maybe.is_some(&2, Status, status(~K, ~eq, st, x)), member(~K, ~eq, running, x)), g, stale, limit, st, running, x)
+
+def apply(-K: Data, a: Step, pool: Pool<K>, +x: K) -> Pool<K>:
+  match a:
+    case PMark{s}:
+      match pool:
+        case Pool{st, running, log}:
+          Pool{Entry{x, s} <> st, running, log}
+    case PStart{}:
+      match pool:
+        case Pool{st, running, log}:
+          Pool{st, x <> running, x <> log}
+    case _:
+      pool
+
+def par.at(-R: Type, a: Step, wait: Unit -> R, go: Unit -> R) -> R:
+  match a:
+    case PWait{}:
+      wait(Unit{})
+    case _:
+      go(Unit{})
+
+# The model of a parallel run. Nodes start in plan order, up to limit at once; es holds the finishes, in the order they arrive.
+# A node that must wait takes the next finish; the run stops when it must wait and no finish is left.
+def par(
+  ~K: Data, ~eq: K -> K -> Bool, es: List<&2, Fin<K>>, p: List<&2, K>, +g: List<&2, Node<K>>, +stale: List<&2, K>, +limit: Nat, +pool: Pool<K>
+) -> Pool<K>:
+  match es:
+    case Nil{}:
+      match p:
+        case Nil{}:
+          pool
+        case Con{+x, +t}:
+          +a = decide.par(~K, ~eq, g, stale, limit, pool, x)
+          par.at(Pool<K>, a, u => pool, u => par(~K, ~eq, Nil{}, t, g, stale, limit, apply(K, a, pool, x)))
+    case Con{+e, +r}:
+      match p:
+        case Nil{}:
+          par(~K, ~eq, r, Nil{}, g, stale, limit, finish(~K, ~eq, pool, e))
+        case Con{+x, +t}:
+          +a = decide.par(~K, ~eq, g, stale, limit, pool, x)
+          par.at(Pool<K>, a,
+            u => par(~K, ~eq, r, x <> t, g, stale, limit, finish(~K, ~eq, pool, e)),
+            u => par(~K, ~eq, e <> r, t, g, stale, limit, apply(K, a, pool, x)))
+
 # Builds
 # ------
 
@@ -689,9 +837,6 @@ type Log is Data:
 type Outcome is Data:
   Outcome{node: String, status: Status, ran: Maybe<&2, Ran>}
 
-type Ledger is Data:
-  Ledger{st: List<&2, Entry<String>>, logs: List<&2, Log>}
-
 def Ran.ok(r: Ran) -> Bool:
   match r:
     case Exited{code, o, e}:
@@ -748,27 +893,71 @@ def run.log(+x: String, m: Maybe<&2, Ran>, logs: List<&2, Log>) -> List<&2, Log>
     case Some{r}:
       Log{x, r} <> logs
 
-def act(-R: Type, a: Action, run: Unit -> R, other: Unit -> R) -> R:
+# A finished command, as its job reports it.
+type Msg is Data:
+  Msg{node: String, ran: Maybe<&2, Ran>}
+
+type Ledger is Data:
+  Ledger{pool: Pool<String>, logs: List<&2, Log>}
+
+def run.job(dir: String, m: Maybe<&2, Task>, +x: String, chan: Chan(Msg)) -> IO(Unit):
+  do IO<Unit>:
+    r : Maybe<&2, Ran> <- run.task(dir, m)
+    s : Result<&1, &1, Msg, Unit> <- Chan.send(Msg, chan, Msg{x, r})
+    return Unit{}
+
+def run.msg(m: Maybe<&1, Msg>, +pool: Pool<String>, +logs: List<&2, Log>, k: Pool<String> -> List<&2, Log> -> IO(Ledger)) -> IO(Ledger):
+  match m:
+    case None{}:
+      IO.pure(Ledger, Ledger{pool, logs})
+    case Some{Msg{+y, +r}}:
+      k(finish(~String, ~String.eq, pool, Fin{y, run.ok(r)}), run.log(y, r, logs))
+
+# Takes the next finished command, then goes on with k.
+def run.recv(+chan: Chan(Msg), +pool: Pool<String>, +logs: List<&2, Log>, k: Pool<String> -> List<&2, Log> -> IO(Ledger)) -> IO(Ledger):
+  IO.bind(Maybe<&1, Msg>, Ledger, Chan.recv(Msg, chan), m => run.msg(m, pool, logs, k))
+
+# Waits for n running commands.
+def run.drain(n: Nat, +pool: Pool<String>, +logs: List<&2, Log>, +chan: Chan(Msg)) -> IO(Ledger):
+  match n:
+    case 0n:
+      IO.pure(Ledger, Ledger{pool, logs})
+    case 1n+m:
+      run.recv(chan, pool, logs, q => l => run.drain(m, q, l, chan))
+
+def Pool.busy(pool: Pool<String>) -> Nat:
+  match pool:
+    case Pool{st, running, log}:
+      List.length(&2, String, running)
+
+def par.case(-R: Type, a: Step, wait: Unit -> R, start: Unit -> R, other: Unit -> R) -> R:
   match a:
-    case Run{}:
-      run(Unit{})
+    case PWait{}:
+      wait(Unit{})
+    case PStart{}:
+      start(Unit{})
     case _:
       other(Unit{})
 
-# exec, with each Run's result from the task's command.
-def run.loop(
-  p: List<&2, String>, +ts: List<&2, Task>, +g: List<&2, Node<String>>, +stale: List<&2, String>,
-  +st: List<&2, Entry<String>>, +logs: List<&2, Log>, +dir: String
+# par, with each finish from a running job. Each wait finishes a node started earlier, so n = 1 + |p| is enough.
+def run.par(
+  n: Nat, p: List<&2, String>, +ts: List<&2, Task>, +g: List<&2, Node<String>>, +stale: List<&2, String>, +limit: Nat,
+  +pool: Pool<String>, +logs: List<&2, Log>, +dir: String, +chan: Chan(Msg)
 ) -> IO(Ledger):
-  match p:
-    case Nil{}:
-      IO.pure(Ledger, Ledger{st, logs})
-    case Con{+x, +t}:
-      +a = decide(~String, ~String.eq, g, stale, st, x)
-      act(IO(Ledger), a,
-        u => IO.bind(Maybe<&2, Ran>, Ledger, run.task(dir, task(ts, x)),
-          +m => run.loop(t, ts, g, stale, step(String, Run{}, st, x, [run.ok(m)]), run.log(x, m, logs), dir)),
-        u => run.loop(t, ts, g, stale, step(String, a, st, x, Nil{}), logs, dir))
+  match n:
+    case 0n:
+      run.drain(Pool.busy(pool), pool, logs, chan)
+    case 1n+(+m):
+      match p:
+        case Nil{}:
+          run.drain(Pool.busy(pool), pool, logs, chan)
+        case Con{+x, +t}:
+          +a = decide.par(~String, ~String.eq, g, stale, limit, pool, x)
+          par.case(IO(Ledger), a,
+            u => run.recv(chan, pool, logs, q => l => run.par(m, x <> t, ts, g, stale, limit, q, l, dir, chan)),
+            u => IO.bind(Unit, Ledger, IO.spawn(Unit, run.job(dir, task(ts, x), x, chan)),
+              v => run.par(1n+m, t, ts, g, stale, limit, apply(String, PStart{}, pool, x), logs, dir, chan)),
+            u => run.par(1n+m, t, ts, g, stale, limit, apply(String, a, pool, x), logs, dir, chan))
 
 def ran.find(logs: List<&2, Log>, +k: String) -> Maybe<&2, Ran>:
   match logs:
@@ -777,12 +966,20 @@ def ran.find(logs: List<&2, Log>, +k: String) -> Maybe<&2, Ran>:
     case Con{Log{+x, +r}, t}:
       when(Maybe<&2, Ran>, u => ran.find(t, k), String.eq(k, x), Some{r})
 
-def outcomes(st: List<&2, Entry<String>>, +logs: List<&2, Log>, acc: List<&2, Outcome>) -> List<&2, Outcome>:
-  match st:
+def outcome.of(m: Maybe<&2, Status>, +x: String, r: Maybe<&2, Ran>, rest: List<&2, Outcome>) -> List<&2, Outcome>:
+  match m:
+    case None{}:
+      rest
+    case Some{s}:
+      Outcome{x, s, r} <> rest
+
+# Each node of p that has a status, in plan order.
+def outcomes(p: List<&2, String>, +st: List<&2, Entry<String>>, +logs: List<&2, Log>) -> List<&2, Outcome>:
+  match p:
     case Nil{}:
-      acc
-    case Con{Entry{+x, s}, t}:
-      outcomes(t, logs, Outcome{x, s, ran.find(logs, x)} <> acc)
+      Nil{}
+    case Con{+x, t}:
+      outcome.of(status(~String, ~String.eq, st, x), x, ran.find(logs, x), outcomes(t, st, logs))
 
 def build.ids(m: Maybe<&2, String>) -> Run(Unit):
   match m:
@@ -798,22 +995,24 @@ def build.plan(r: Result<&2, &2, Error<String>, List<&2, String>>) -> Run(List<&
     case Done{p}:
       Run.pure(List<&2, String>, p)
 
-def build.done(+path: String, +now: List<&2, Stamp>, old: List<&2, Stamp>, l: Ledger) -> Run(List<&2, Outcome>):
+def build.done(+path: String, p: List<&2, String>, +now: List<&2, Stamp>, old: List<&2, Stamp>, l: Ledger) -> Run(List<&2, Outcome>):
   match l:
-    case Ledger{+st, logs}:
+    case Ledger{Pool{+st, running, log}, logs}:
       do Run<List<&2, Outcome>>:
         stamps.write(path, after(st, now, old))
-        return outcomes(st, logs, Nil{})
+        return outcomes(p, st, logs)
 
-# Plans targets, runs each stale task in dir, reuses the rest, and records stamps in path.
+# Plans targets, runs each stale task in dir, up to jobs at once, reuses the rest, and records stamps in path.
 # The result is each planned node with its status and command output, in plan order.
-def build(+tasks: List<&2, Task>, +targets: List<&2, String>, +dir: String, +path: String) -> Run(List<&2, Outcome>):
+def build(+tasks: List<&2, Task>, +targets: List<&2, String>, +dir: String, +path: String, +jobs: U32) -> Run(List<&2, Outcome>):
   +g = graph(tasks)
+  +limit = U32.to_nat(U32.max(jobs, 1))
   do Run<List<&2, Outcome>>:
     build.ids(ids.bad(tasks))
     +p : List<&2, String> <- build.plan(plan(~String, ~String.eq, g, targets))
     +old : List<&2, Stamp> <- Run.lift(List<&2, Stamp>, stamps.read(path))
     +now : List<&2, Stamp> <- Run.lift(List<&2, Stamp>, stamps.now(p, tasks, dir, Nil{}))
     +stale : List<&2, String> = invalidate(~String, ~String.eq, p, g, changed(p, old, now))
-    l : Ledger <- Run.lift(Ledger, run.loop(p, tasks, g, stale, Nil{}, Nil{}, dir))
-    build.done(path, now, old, l)
+    +chan : Chan(Msg) <- Run.lift(Chan(Msg), Chan.new(Msg, U32.max(jobs, 1)))
+    l : Ledger <- Run.lift(Ledger, run.par(1n+List.length(&2, String, p), p, tasks, g, stale, limit, Pool{Nil{}, Nil{}, Nil{}}, Nil{}, dir, chan))
+    build.done(path, p, now, old, l)

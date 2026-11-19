@@ -1676,16 +1676,7 @@ def add_succ(a: Nat, +b: Nat) -> {Nat.add(a, 1n+b) == 1n+Nat.add(a, b) : Nat}:
     case 1n+p:
       Equal.cong(Nat, Nat, m => 1n+m, Nat.add(p, 1n+b), 1n+Nat.add(p, b), add_succ(p, b))
 
-def le(a: Nat, b: Nat) -> Bool:
-  match a b:
-    case 0n _:
-      True{}
-    case 1n+p 0n:
-      False{}
-    case 1n+p 1n+q:
-      le(p, q)
-
-def le_succ_self(n: Nat) -> {le(1n+n, n) == False{} : Bool}:
+def le_succ_self(n: Nat) -> {P.le(1n+n, n) == False{} : Bool}:
   match n:
     case 0n:
       {==}
@@ -1831,7 +1822,7 @@ def defd_rm(
 def ph(
   ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), xs: List<&2, K>, +g: List<&2, P.Node<K>>,
   hdist: {P.distinct(~K, ~eq, xs) == True{} : Bool}, hd: {defd(~K, ~eq, xs, g) == True{} : Bool}
-) -> {le(List.length(&2, K, xs), Len(K, g)) == True{} : Bool}:
+) -> {P.le(List.length(&2, K, xs), Len(K, g)) == True{} : Bool}:
   match xs:
     case Nil{}:
       {==}
@@ -1840,7 +1831,7 @@ def ph(
       +hd = hd
       +hnr = not_true(P.member(~K, ~eq, r, x), and_l(Bool.not(P.member(~K, ~eq, r, x)), P.distinct(~K, ~eq, r), hdist))
       %Equal.sym(Nat, Len(K, g), 1n+Len(K, rm(~K, ~eq, g, x)), len_rm(~K, ~eq, g, x, and_l(Def(~K, ~eq, g, x), defd(~K, ~eq, r, g), hd))) :
-        {le(1n+List.length(&2, K, r), _) == True{} : Bool}
+        {P.le(1n+List.length(&2, K, r), _) == True{} : Bool}
       ph(~K, ~eq, ~sound, ~refl, r, rm(~K, ~eq, g, x),
         and_r(Bool.not(P.member(~K, ~eq, r, x)), P.distinct(~K, ~eq, r), hdist),
         defd_rm(~K, ~eq, ~sound, ~refl, r, g, x, hnr, and_r(Def(~K, ~eq, g, x), defd(~K, ~eq, r, g), hd)))
@@ -2290,9 +2281,9 @@ def good(
       (hdef, hfuel) = p5
       +n = List.length(&2, K, path)
       Empty.absurd(Good(~K, ~eq, g, ts, ds, path, done, P.go.out(K, ds, done)),
-        clash(le(1n+Len(K, g), Len(K, g)),
+        clash(P.le(1n+Len(K, g), Len(K, g)),
           (%Equal.trans(Nat, n, Nat.add(n, 0n), 1n+Len(K, g), Equal.sym(Nat, Nat.add(n, 0n), n, add_zero(n)), hfuel) :
-             {le(_, Len(K, g)) == True{} : Bool}
+             {P.le(_, Len(K, g)) == True{} : Bool}
            ph(~K, ~eq, ~sound, ~refl, path, g, hdist, hdef)),
           le_succ_self(Len(K, g))))
     case 1n+(+f):
@@ -2432,8 +2423,1288 @@ def Laws.plan_cycle_path(K, eq, sound, refl, g, ts, c, h):
 def Laws.plan_complete(K, eq, sound, refl, g, ts, h):
   plan_bad(~K, ~eq, ~sound, ~refl, g, ts, P.Refused{}, h)
 
+# Parallel execution: lists
+# -------------------------
+
+def or_false_l2(a: Bool, -b: Bool, h: {Bool.or(a, b) == False{} : Bool}) -> {a == False{} : Bool}:
+  match a:
+    case True{}:
+      Empty.absurd({True{} == False{} : Bool}, true_ne_false(h))
+    case False{}:
+      {==}
+
+def or_mono_l(a: Bool, -b: Bool, c: Bool, h: {Bool.or(a, b) == True{} : Bool}, f: {a == True{} : Bool} -> {c == True{} : Bool}) ->
+  {Bool.or(c, b) == True{} : Bool}:
+  match a:
+    case True{}:
+      or_true_l(c, b, f({==}))
+    case False{}:
+      or_true_r(c, b, h)
+
+def or_swap(a: Bool, b: Bool, h: {Bool.or(a, b) == True{} : Bool}) -> {Bool.or(b, a) == True{} : Bool}:
+  match a:
+    case True{}:
+      or_true_r(b, True{}, {==})
+    case False{}:
+      or_true_l(b, False{}, h)
+
+def none_of2(m: Maybe<&2, P.Status>, h: {Maybe.is_none(&2, P.Status, m) == True{} : Bool}) -> {m == None{} : Maybe<&2, P.Status>}:
+  match m:
+    case None{}:
+      {==}
+    case Some{s}:
+      Empty.absurd({Some{s} == None{} : Maybe<&2, P.Status>}, false_ne_true(h))
+
+def is_none_of(m: Maybe<&2, P.Status>, h: {m == None{} : Maybe<&2, P.Status>}) -> {Maybe.is_none(&2, P.Status, m) == True{} : Bool}:
+  %Equal.sym(Maybe<&2, P.Status>, m, None{}, h) : {Maybe.is_none(&2, P.Status, _) == True{} : Bool}
+  {==}
+
+def drop_hit(~K: Data, ~eq: K -> K -> Bool, +z: K, +t: List<&2, K>, +y: K, e: {eq(y, z) == True{} : Bool}) ->
+  {P.drop(~K, ~eq, z <> t, y) == P.drop(~K, ~eq, t, y) : List<&2, K>}:
+  %Equal.sym(Bool, eq(y, z), True{}, e) : {P.invalidate.if(K, Bool.not(_), z, P.drop(~K, ~eq, t, y)) == P.drop(~K, ~eq, t, y) : List<&2, K>}
+  {==}
+
+def drop_miss(~K: Data, ~eq: K -> K -> Bool, +z: K, +t: List<&2, K>, +y: K, e: {eq(y, z) == False{} : Bool}) ->
+  {P.drop(~K, ~eq, z <> t, y) == z <> P.drop(~K, ~eq, t, y) : List<&2, K>}:
+  %Equal.sym(Bool, eq(y, z), False{}, e) : {P.invalidate.if(K, Bool.not(_), z, P.drop(~K, ~eq, t, y)) == z <> P.drop(~K, ~eq, t, y) : List<&2, K>}
+  {==}
+
+def Dr(~K: Data, ~eq: K -> K -> Bool, +xs: List<&2, K>, +y: K) -> List<&2, K>:
+  P.drop(~K, ~eq, xs, y)
+
+def mem_drop_sub.miss(~K: Data, ~eq: K -> K -> Bool, c: Bool, +z: K, +t: List<&2, K>, +y: K, +x: K,
+  hc: {eq(x, z) == c : Bool}, h: {P.member(~K, ~eq, z <> Dr(~K, ~eq, t, y), x) == True{} : Bool},
+  ih: {P.member(~K, ~eq, Dr(~K, ~eq, t, y), x) == True{} : Bool} -> {P.member(~K, ~eq, t, x) == True{} : Bool}
+) -> {P.member(~K, ~eq, z <> t, x) == True{} : Bool}:
+  match c:
+    case True{}:
+      mem_hit(~K, ~eq, z, t, x, hc)
+    case False{}:
+      mem_cons_r(~K, ~eq, z, t, x, ih(mem_tail(~K, ~eq, z, Dr(~K, ~eq, t, y), x, hc, h)))
+
+def mem_drop_sub.if(~K: Data, ~eq: K -> K -> Bool, c: Bool, +z: K, +t: List<&2, K>, +y: K, +x: K,
+  +hc: {eq(y, z) == c : Bool}, h: {P.member(~K, ~eq, Dr(~K, ~eq, z <> t, y), x) == True{} : Bool},
+  ih: {P.member(~K, ~eq, Dr(~K, ~eq, t, y), x) == True{} : Bool} -> {P.member(~K, ~eq, t, x) == True{} : Bool}
+) -> {P.member(~K, ~eq, z <> t, x) == True{} : Bool}:
+  match c:
+    case True{}:
+      mem_cons_r(~K, ~eq, z, t, x, ih(%drop_hit(~K, ~eq, z, t, y, hc) : {P.member(~K, ~eq, _, x) == True{} : Bool} h))
+    case False{}:
+      mem_drop_sub.miss(~K, ~eq, eq(x, z), z, t, y, x, {==},
+        (%drop_miss(~K, ~eq, z, t, y, hc) : {P.member(~K, ~eq, _, x) == True{} : Bool} h), ih)
+
+# A node left by drop was in the list.
+def mem_drop_sub(~K: Data, ~eq: K -> K -> Bool, xs: List<&2, K>, +y: K, +x: K, h: {P.member(~K, ~eq, Dr(~K, ~eq, xs, y), x) == True{} : Bool}) ->
+  {P.member(~K, ~eq, xs, x) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      h
+    case Con{+z, +t}:
+      mem_drop_sub.if(~K, ~eq, eq(y, z), z, t, y, x, {==}, h, hm => mem_drop_sub(~K, ~eq, t, y, x, hm))
+
+def mem_drop_keep.miss(~K: Data, ~eq: K -> K -> Bool, c: Bool, +z: K, +t: List<&2, K>, +y: K, +x: K,
+  hc: {eq(x, z) == c : Bool}, h: {P.member(~K, ~eq, z <> t, x) == True{} : Bool},
+  ih: {P.member(~K, ~eq, t, x) == True{} : Bool} -> {P.member(~K, ~eq, Dr(~K, ~eq, t, y), x) == True{} : Bool}
+) -> {P.member(~K, ~eq, z <> Dr(~K, ~eq, t, y), x) == True{} : Bool}:
+  match c:
+    case True{}:
+      mem_hit(~K, ~eq, z, Dr(~K, ~eq, t, y), x, hc)
+    case False{}:
+      mem_cons_r(~K, ~eq, z, Dr(~K, ~eq, t, y), x, ih(mem_tail(~K, ~eq, z, t, x, hc, h)))
+
+def mem_drop_keep.hit(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), c: Bool, +z: K, +t: List<&2, K>, +y: K, +x: K,
+  hc: {eq(x, z) == c : Bool}, hyz: {eq(y, z) == True{} : Bool}, hne: {eq(y, x) == False{} : Bool}, h: {P.member(~K, ~eq, z <> t, x) == True{} : Bool},
+  ih: {P.member(~K, ~eq, t, x) == True{} : Bool} -> {P.member(~K, ~eq, Dr(~K, ~eq, t, y), x) == True{} : Bool}
+) -> {P.member(~K, ~eq, Dr(~K, ~eq, t, y), x) == True{} : Bool}:
+  match c:
+    case True{}:
+      Empty.absurd({P.member(~K, ~eq, Dr(~K, ~eq, t, y), x) == True{} : Bool},
+        clash(eq(y, x), (%Equal.sym(K, x, z, sound(x, z, hc)) : {eq(y, _) == True{} : Bool} hyz), hne))
+    case False{}:
+      ih(mem_tail(~K, ~eq, z, t, x, hc, h))
+
+def mem_drop_keep.if(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), c: Bool, +z: K, +t: List<&2, K>, +y: K, +x: K,
+  +hc: {eq(y, z) == c : Bool}, hne: {eq(y, x) == False{} : Bool}, h: {P.member(~K, ~eq, z <> t, x) == True{} : Bool},
+  ih: {P.member(~K, ~eq, t, x) == True{} : Bool} -> {P.member(~K, ~eq, Dr(~K, ~eq, t, y), x) == True{} : Bool}
+) -> {P.member(~K, ~eq, Dr(~K, ~eq, z <> t, y), x) == True{} : Bool}:
+  match c:
+    case True{}:
+      %Equal.sym(List<&2, K>, Dr(~K, ~eq, z <> t, y), Dr(~K, ~eq, t, y), drop_hit(~K, ~eq, z, t, y, hc)) : {P.member(~K, ~eq, _, x) == True{} : Bool}
+      mem_drop_keep.hit(~K, ~eq, ~sound, eq(x, z), z, t, y, x, {==}, hc, hne, h, ih)
+    case False{}:
+      %Equal.sym(List<&2, K>, Dr(~K, ~eq, z <> t, y), z <> Dr(~K, ~eq, t, y), drop_miss(~K, ~eq, z, t, y, hc)) : {P.member(~K, ~eq, _, x) == True{} : Bool}
+      mem_drop_keep.miss(~K, ~eq, eq(x, z), z, t, y, x, {==}, h, ih)
+
+# drop keeps the nodes other than y.
+def mem_drop_keep(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), xs: List<&2, K>, +y: K, +x: K,
+  +hne: {eq(y, x) == False{} : Bool}, h: {P.member(~K, ~eq, xs, x) == True{} : Bool}
+) -> {P.member(~K, ~eq, Dr(~K, ~eq, xs, y), x) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      h
+    case Con{+z, +t}:
+      mem_drop_keep.if(~K, ~eq, ~sound, eq(y, z), z, t, y, x, {==}, hne, h, hm => mem_drop_keep(~K, ~eq, ~sound, t, y, x, hne, hm))
+
+def mem_drop_self.miss(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), c: Bool, +z: K, +t: List<&2, K>, +y: K, +x: K,
+  +hc: {eq(x, z) == c : Bool}, hyz: {eq(y, z) == False{} : Bool}, +hxy: {eq(x, y) == True{} : Bool},
+  ih: {P.member(~K, ~eq, Dr(~K, ~eq, t, y), x) == False{} : Bool}
+) -> {P.member(~K, ~eq, z <> Dr(~K, ~eq, t, y), x) == False{} : Bool}:
+  match c:
+    case True{}:
+      Empty.absurd({P.member(~K, ~eq, z <> Dr(~K, ~eq, t, y), x) == False{} : Bool},
+        clash(eq(y, z),
+          (%Equal.trans(K, y, x, z, Equal.sym(K, x, y, sound(x, y, hxy)), sound(x, z, hc)) : {eq(y, _) == True{} : Bool} refl(y)), hyz))
+    case False{}:
+      mem_cons_false(~K, ~eq, z, Dr(~K, ~eq, t, y), x, hc, ih)
+
+def mem_drop_self.if(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), c: Bool, +z: K, +t: List<&2, K>, +y: K, +x: K,
+  +hc: {eq(y, z) == c : Bool}, +hxy: {eq(x, y) == True{} : Bool},
+  ih: {P.member(~K, ~eq, Dr(~K, ~eq, t, y), x) == False{} : Bool}
+) -> {P.member(~K, ~eq, Dr(~K, ~eq, z <> t, y), x) == False{} : Bool}:
+  match c:
+    case True{}:
+      %Equal.sym(List<&2, K>, Dr(~K, ~eq, z <> t, y), Dr(~K, ~eq, t, y), drop_hit(~K, ~eq, z, t, y, hc)) : {P.member(~K, ~eq, _, x) == False{} : Bool}
+      ih
+    case False{}:
+      %Equal.sym(List<&2, K>, Dr(~K, ~eq, z <> t, y), z <> Dr(~K, ~eq, t, y), drop_miss(~K, ~eq, z, t, y, hc)) : {P.member(~K, ~eq, _, x) == False{} : Bool}
+      mem_drop_self.miss(~K, ~eq, ~sound, ~refl, eq(x, z), z, t, y, x, {==}, hc, hxy, ih)
+
+# drop leaves no node eq to y.
+def mem_drop_self(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), xs: List<&2, K>, +y: K, +x: K,
+  +hxy: {eq(x, y) == True{} : Bool}
+) -> {P.member(~K, ~eq, Dr(~K, ~eq, xs, y), x) == False{} : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+z, +t}:
+      mem_drop_self.if(~K, ~eq, ~sound, ~refl, eq(y, z), z, t, y, x, {==}, hxy, mem_drop_self(~K, ~eq, ~sound, ~refl, t, y, x, hxy))
+
+def le_succ_r(a: Nat, +b: Nat, h: {P.le(a, b) == True{} : Bool}) -> {P.le(a, 1n+b) == True{} : Bool}:
+  match a b:
+    case 0n _:
+      {==}
+    case 1n+p 0n:
+      Empty.absurd({P.le(1n+p, 1n) == True{} : Bool}, false_ne_true(h))
+    case 1n+p 1n+q:
+      le_succ_r(p, q, h)
+
+def le_trans(a: Nat, +b: Nat, +c: Nat, h1: {P.le(a, b) == True{} : Bool}, h2: {P.le(b, c) == True{} : Bool}) -> {P.le(a, c) == True{} : Bool}:
+  match a b c:
+    case 0n _ _:
+      {==}
+    case 1n+p 0n _:
+      Empty.absurd({P.le(1n+p, c) == True{} : Bool}, false_ne_true(h1))
+    case 1n+p 1n+q 0n:
+      Empty.absurd({False{} == True{} : Bool}, false_ne_true(h2))
+    case 1n+p 1n+q 1n+r:
+      le_trans(p, q, r, h1, h2)
+
+def Ln(-K: Data, xs: List<&2, K>) -> Nat:
+  List.length(&2, K, xs)
+
+def len_drop.if(~K: Data, ~eq: K -> K -> Bool, c: Bool, +z: K, +t: List<&2, K>, +y: K,
+  +hc: {eq(y, z) == c : Bool}, ih: {P.le(Ln(K, Dr(~K, ~eq, t, y)), Ln(K, t)) == True{} : Bool}
+) -> {P.le(Ln(K, Dr(~K, ~eq, z <> t, y)), 1n+Ln(K, t)) == True{} : Bool}:
+  match c:
+    case True{}:
+      %Equal.sym(List<&2, K>, Dr(~K, ~eq, z <> t, y), Dr(~K, ~eq, t, y), drop_hit(~K, ~eq, z, t, y, hc)) : {P.le(Ln(K, _), 1n+Ln(K, t)) == True{} : Bool}
+      le_succ_r(Ln(K, Dr(~K, ~eq, t, y)), Ln(K, t), ih)
+    case False{}:
+      %Equal.sym(List<&2, K>, Dr(~K, ~eq, z <> t, y), z <> Dr(~K, ~eq, t, y), drop_miss(~K, ~eq, z, t, y, hc)) : {P.le(Ln(K, _), 1n+Ln(K, t)) == True{} : Bool}
+      ih
+
+def len_drop(~K: Data, ~eq: K -> K -> Bool, xs: List<&2, K>, +y: K) -> {P.le(Ln(K, Dr(~K, ~eq, xs, y)), Ln(K, xs)) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+z, +t}:
+      len_drop.if(~K, ~eq, eq(y, z), z, t, y, {==}, len_drop(~K, ~eq, t, y))
+
+def any_nil(~K: Data, ~eq: K -> K -> Bool, ds: List<&2, K>) -> {P.any_in(~K, ~eq, ds, Nil{}) == False{} : Bool}:
+  match ds:
+    case Nil{}:
+      {==}
+    case Con{+d, +t}:
+      any_nil(~K, ~eq, t)
+
+# Parallel execution: pool facts
+# ------------------------------
+
+# No running node has a status.
+def none_all(~K: Data, ~eq: K -> K -> Bool, r: List<&2, K>, +st: List<&2, P.Entry<K>>) -> Bool:
+  match r:
+    case Nil{}:
+      True{}
+    case Con{+z, t}:
+      Bool.and(Maybe.is_none(&2, P.Status, St(~K, ~eq, st, z)), none_all(~K, ~eq, t, st))
+
+# Every started node runs or has a status.
+def logged(~K: Data, ~eq: K -> K -> Bool, l: List<&2, K>, +r: List<&2, K>, +st: List<&2, P.Entry<K>>) -> Bool:
+  match l:
+    case Nil{}:
+      True{}
+    case Con{+z, t}:
+      Bool.and(Bool.or(P.member(~K, ~eq, r, z), Maybe.is_some(&2, P.Status, St(~K, ~eq, st, z))), logged(~K, ~eq, t, r, st))
+
+def none_mem.if(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), c: Bool, +z: K, +t: List<&2, K>, +st: List<&2, P.Entry<K>>, +y: K,
+  hc: {eq(y, z) == c : Bool}, hz: {Maybe.is_none(&2, P.Status, St(~K, ~eq, st, z)) == True{} : Bool}, hm: {P.member(~K, ~eq, z <> t, y) == True{} : Bool},
+  ih: {P.member(~K, ~eq, t, y) == True{} : Bool} -> {St(~K, ~eq, st, y) == None{} : Maybe<&2, P.Status>}
+) -> {St(~K, ~eq, st, y) == None{} : Maybe<&2, P.Status>}:
+  match c:
+    case True{}:
+      %Equal.sym(K, y, z, sound(y, z, hc)) : {St(~K, ~eq, st, _) == None{} : Maybe<&2, P.Status>}
+      none_of2(St(~K, ~eq, st, z), hz)
+    case False{}:
+      ih(mem_tail(~K, ~eq, z, t, y, hc, hm))
+
+# A running node has no status.
+def none_mem(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), r: List<&2, K>, +st: List<&2, P.Entry<K>>, +y: K,
+  h: {none_all(~K, ~eq, r, st) == True{} : Bool}, hm: {P.member(~K, ~eq, r, y) == True{} : Bool}
+) -> {St(~K, ~eq, st, y) == None{} : Maybe<&2, P.Status>}:
+  match r:
+    case Nil{}:
+      Empty.absurd({St(~K, ~eq, st, y) == None{} : Maybe<&2, P.Status>}, false_ne_true(hm))
+    case Con{+z, +t}:
+      +h = h
+      +hz = Maybe.is_none(&2, P.Status, St(~K, ~eq, st, z))
+      none_mem.if(~K, ~eq, ~sound, eq(y, z), z, t, st, y, {==}, and_l(hz, none_all(~K, ~eq, t, st), h), hm,
+        hh => none_mem(~K, ~eq, ~sound, t, st, y, and_r(hz, none_all(~K, ~eq, t, st), h), hh))
+
+def none_cons.if(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), c: Bool, +z: K, +t: List<&2, K>,
+  +st: List<&2, P.Entry<K>>, +y: K, +s: P.Status,
+  +hc: {eq(z, y) == c : Bool}, hm: {P.member(~K, ~eq, z <> t, y) == False{} : Bool},
+  hz: {Maybe.is_none(&2, P.Status, St(~K, ~eq, st, z)) == True{} : Bool},
+  ih: {P.member(~K, ~eq, t, y) == False{} : Bool} -> {none_all(~K, ~eq, t, P.Entry{y, s} <> st) == True{} : Bool}
+) -> {none_all(~K, ~eq, z <> t, P.Entry{y, s} <> st) == True{} : Bool}:
+  match c:
+    case True{}:
+      Empty.absurd({none_all(~K, ~eq, z <> t, P.Entry{y, s} <> st) == True{} : Bool},
+        clash(P.member(~K, ~eq, z <> t, y),
+          mem_hit(~K, ~eq, z, t, y, (%Equal.sym(K, z, y, sound(z, y, hc)) : {eq(y, _) == True{} : Bool} refl(y))), hm))
+    case False{}:
+      and_true(Maybe.is_none(&2, P.Status, St(~K, ~eq, P.Entry{y, s} <> st, z)), none_all(~K, ~eq, t, P.Entry{y, s} <> st),
+        (%Equal.sym(Maybe<&2, P.Status>, St(~K, ~eq, P.Entry{y, s} <> st, z), St(~K, ~eq, st, z), st_miss(~K, ~eq, y, s, st, z, hc)) : {Maybe.is_none(&2, P.Status, _) == True{} : Bool} hz),
+        ih(mem_tail_false(~K, ~eq, z, t, y, eq_sym_false(~K, ~eq, ~sound, ~refl, z, y, hc), hm)))
+
+def none_cons(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), r: List<&2, K>, +st: List<&2, P.Entry<K>>, +y: K, +s: P.Status,
+  hm: {P.member(~K, ~eq, r, y) == False{} : Bool}, h: {none_all(~K, ~eq, r, st) == True{} : Bool}
+) -> {none_all(~K, ~eq, r, P.Entry{y, s} <> st) == True{} : Bool}:
+  match r:
+    case Nil{}:
+      {==}
+    case Con{+z, +t}:
+      +h = h
+      +hz = Maybe.is_none(&2, P.Status, St(~K, ~eq, st, z))
+      none_cons.if(~K, ~eq, ~sound, ~refl, eq(z, y), z, t, st, y, s, {==}, hm, and_l(hz, none_all(~K, ~eq, t, st), h),
+        hh => none_cons(~K, ~eq, ~sound, ~refl, t, st, y, s, hh, and_r(hz, none_all(~K, ~eq, t, st), h)))
+
+def none_drop.if(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), c: Bool, +z: K, +t: List<&2, K>,
+  +st: List<&2, P.Entry<K>>, +y: K, +s: P.Status,
+  +hc: {eq(y, z) == c : Bool}, hz: {Maybe.is_none(&2, P.Status, St(~K, ~eq, st, z)) == True{} : Bool},
+  ih: {none_all(~K, ~eq, Dr(~K, ~eq, t, y), P.Entry{y, s} <> st) == True{} : Bool}
+) -> {none_all(~K, ~eq, Dr(~K, ~eq, z <> t, y), P.Entry{y, s} <> st) == True{} : Bool}:
+  match c:
+    case True{}:
+      %Equal.sym(List<&2, K>, Dr(~K, ~eq, z <> t, y), Dr(~K, ~eq, t, y), drop_hit(~K, ~eq, z, t, y, hc)) :
+        {none_all(~K, ~eq, _, P.Entry{y, s} <> st) == True{} : Bool}
+      ih
+    case False{}:
+      %Equal.sym(List<&2, K>, Dr(~K, ~eq, z <> t, y), z <> Dr(~K, ~eq, t, y), drop_miss(~K, ~eq, z, t, y, hc)) :
+        {none_all(~K, ~eq, _, P.Entry{y, s} <> st) == True{} : Bool}
+      and_true(Maybe.is_none(&2, P.Status, St(~K, ~eq, P.Entry{y, s} <> st, z)), none_all(~K, ~eq, Dr(~K, ~eq, t, y), P.Entry{y, s} <> st),
+        (%Equal.sym(Maybe<&2, P.Status>, St(~K, ~eq, P.Entry{y, s} <> st, z), St(~K, ~eq, st, z), st_miss(~K, ~eq, y, s, st, z, eq_sym_false(~K, ~eq, ~sound, ~refl, y, z, hc))) : {Maybe.is_none(&2, P.Status, _) == True{} : Bool} hz),
+        ih)
+
+def none_drop(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), r: List<&2, K>, +st: List<&2, P.Entry<K>>, +y: K, +s: P.Status,
+  h: {none_all(~K, ~eq, r, st) == True{} : Bool}
+) -> {none_all(~K, ~eq, Dr(~K, ~eq, r, y), P.Entry{y, s} <> st) == True{} : Bool}:
+  match r:
+    case Nil{}:
+      {==}
+    case Con{+z, +t}:
+      +h = h
+      +hz = Maybe.is_none(&2, P.Status, St(~K, ~eq, st, z))
+      none_drop.if(~K, ~eq, ~sound, ~refl, eq(y, z), z, t, st, y, s, {==}, and_l(hz, none_all(~K, ~eq, t, st), h),
+        none_drop(~K, ~eq, ~sound, ~refl, t, st, y, s, and_r(hz, none_all(~K, ~eq, t, st), h)))
+
+def Acp(~K: Data, ~eq: K -> K -> Bool, +r: List<&2, K>, +st: List<&2, P.Entry<K>>, +z: K) -> Bool:
+  Bool.or(P.member(~K, ~eq, r, z), Maybe.is_some(&2, P.Status, St(~K, ~eq, st, z)))
+
+def logged_mark(~K: Data, ~eq: K -> K -> Bool, l: List<&2, K>, +r: List<&2, K>, +st: List<&2, P.Entry<K>>, +y: K, +s: P.Status,
+  h: {logged(~K, ~eq, l, r, st) == True{} : Bool}
+) -> {logged(~K, ~eq, l, r, P.Entry{y, s} <> st) == True{} : Bool}:
+  match l:
+    case Nil{}:
+      {==}
+    case Con{+z, +t}:
+      +h = h
+      and_true(Acp(~K, ~eq, r, P.Entry{y, s} <> st, z), logged(~K, ~eq, t, r, P.Entry{y, s} <> st),
+        or_mono(P.member(~K, ~eq, r, z), Maybe.is_some(&2, P.Status, St(~K, ~eq, st, z)), Maybe.is_some(&2, P.Status, St(~K, ~eq, P.Entry{y, s} <> st, z)),
+          and_l(Acp(~K, ~eq, r, st, z), logged(~K, ~eq, t, r, st), h),
+          f => some_keep.if(~K, ~eq, eq(z, y), y, s, st, z, {==}, f)),
+        logged_mark(~K, ~eq, t, r, st, y, s, and_r(Acp(~K, ~eq, r, st, z), logged(~K, ~eq, t, r, st), h)))
+
+def logged_cons_run(~K: Data, ~eq: K -> K -> Bool, l: List<&2, K>, +r: List<&2, K>, +st: List<&2, P.Entry<K>>, +y: K,
+  h: {logged(~K, ~eq, l, r, st) == True{} : Bool}
+) -> {logged(~K, ~eq, l, y <> r, st) == True{} : Bool}:
+  match l:
+    case Nil{}:
+      {==}
+    case Con{+z, +t}:
+      +h = h
+      +so = Maybe.is_some(&2, P.Status, St(~K, ~eq, st, z))
+      and_true(Acp(~K, ~eq, y <> r, st, z), logged(~K, ~eq, t, y <> r, st),
+        or_mono_l(P.member(~K, ~eq, r, z), so, P.member(~K, ~eq, y <> r, z),
+          and_l(Acp(~K, ~eq, r, st, z), logged(~K, ~eq, t, r, st), h),
+          f => mem_cons_r(~K, ~eq, y, r, z, f)),
+        logged_cons_run(~K, ~eq, t, r, st, y, and_r(Acp(~K, ~eq, r, st, z), logged(~K, ~eq, t, r, st), h)))
+
+def logged_start(~K: Data, ~eq: K -> K -> Bool, ~refl: Refl(~K, ~eq), +l: List<&2, K>, +r: List<&2, K>, +st: List<&2, P.Entry<K>>, +y: K,
+  h: {logged(~K, ~eq, l, r, st) == True{} : Bool}
+) -> {logged(~K, ~eq, y <> l, y <> r, st) == True{} : Bool}:
+  and_true(Acp(~K, ~eq, y <> r, st, y), logged(~K, ~eq, l, y <> r, st),
+    or_true_l(P.member(~K, ~eq, y <> r, y), Maybe.is_some(&2, P.Status, St(~K, ~eq, st, y)), mem_hit(~K, ~eq, y, r, y, refl(y))),
+    logged_cons_run(~K, ~eq, l, r, st, y, h))
+
+def logged_not.if(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), c: Bool, +z: K, +t: List<&2, K>, +r: List<&2, K>, +st: List<&2, P.Entry<K>>, +y: K,
+  +hc: {eq(y, z) == c : Bool}, hz: {Acp(~K, ~eq, r, st, z) == True{} : Bool},
+  hr: {P.member(~K, ~eq, r, y) == False{} : Bool}, hs: {St(~K, ~eq, st, y) == None{} : Maybe<&2, P.Status>},
+  ih: {P.member(~K, ~eq, t, y) == False{} : Bool}
+) -> {P.member(~K, ~eq, z <> t, y) == False{} : Bool}:
+  match c:
+    case True{}:
+      Empty.absurd({P.member(~K, ~eq, z <> t, y) == False{} : Bool},
+        false_ne_true(
+          (%hs : {Bool.or(False{}, Maybe.is_some(&2, P.Status, _)) == True{} : Bool}
+           (%hr : {Bool.or(_, Maybe.is_some(&2, P.Status, St(~K, ~eq, st, y))) == True{} : Bool}
+            (%Equal.sym(K, y, z, sound(y, z, hc)) : {Acp(~K, ~eq, r, st, _) == True{} : Bool} hz)))))
+    case False{}:
+      mem_cons_false(~K, ~eq, z, t, y, hc, ih)
+
+# A node that neither runs nor has a status was never started.
+def logged_not(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), l: List<&2, K>, +r: List<&2, K>, +st: List<&2, P.Entry<K>>, +y: K,
+  h: {logged(~K, ~eq, l, r, st) == True{} : Bool}, +hr: {P.member(~K, ~eq, r, y) == False{} : Bool}, +hs: {St(~K, ~eq, st, y) == None{} : Maybe<&2, P.Status>}
+) -> {P.member(~K, ~eq, l, y) == False{} : Bool}:
+  match l:
+    case Nil{}:
+      {==}
+    case Con{+z, +t}:
+      +h = h
+      logged_not.if(~K, ~eq, ~sound, eq(y, z), z, t, r, st, y, {==}, and_l(Acp(~K, ~eq, r, st, z), logged(~K, ~eq, t, r, st), h), hr, hs,
+        logged_not(~K, ~eq, ~sound, t, r, st, y, and_r(Acp(~K, ~eq, r, st, z), logged(~K, ~eq, t, r, st), h), hr, hs))
+
+def acc_fin.miss(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), b: Bool, +r: List<&2, K>, +st: List<&2, P.Entry<K>>, +y: K, +s: P.Status, +z: K,
+  hb: {P.member(~K, ~eq, r, z) == b : Bool}, +hzy: {eq(z, y) == False{} : Bool},
+  h: {Bool.or(b, Maybe.is_some(&2, P.Status, St(~K, ~eq, st, z))) == True{} : Bool}
+) -> {Acp(~K, ~eq, Dr(~K, ~eq, r, y), P.Entry{y, s} <> st, z) == True{} : Bool}:
+  match b:
+    case True{}:
+      or_true_l(P.member(~K, ~eq, Dr(~K, ~eq, r, y), z), Maybe.is_some(&2, P.Status, St(~K, ~eq, P.Entry{y, s} <> st, z)),
+        mem_drop_keep(~K, ~eq, ~sound, r, y, z, eq_sym_false(~K, ~eq, ~sound, ~refl, z, y, hzy), hb))
+    case False{}:
+      or_true_r(P.member(~K, ~eq, Dr(~K, ~eq, r, y), z), Maybe.is_some(&2, P.Status, St(~K, ~eq, P.Entry{y, s} <> st, z)),
+        some_keep.if(~K, ~eq, False{}, y, s, st, z, hzy, h))
+
+def acc_fin.if(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), c: Bool, +r: List<&2, K>, +st: List<&2, P.Entry<K>>, +y: K, +s: P.Status, +z: K,
+  +hc: {eq(z, y) == c : Bool}, h: {Acp(~K, ~eq, r, st, z) == True{} : Bool}
+) -> {Acp(~K, ~eq, Dr(~K, ~eq, r, y), P.Entry{y, s} <> st, z) == True{} : Bool}:
+  match c:
+    case True{}:
+      or_true_r(P.member(~K, ~eq, Dr(~K, ~eq, r, y), z), Maybe.is_some(&2, P.Status, St(~K, ~eq, P.Entry{y, s} <> st, z)),
+        (%Equal.sym(Maybe<&2, P.Status>, St(~K, ~eq, P.Entry{y, s} <> st, z), Some{s}, st_hit(~K, ~eq, y, s, st, z, hc)) :
+          {Maybe.is_some(&2, P.Status, _) == True{} : Bool} {==}))
+    case False{}:
+      acc_fin.miss(~K, ~eq, ~sound, ~refl, P.member(~K, ~eq, r, z), r, st, y, s, z, {==}, hc, h)
+
+# A finish keeps every node accounted for: it runs, or it has a status.
+def acc_fin(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), +r: List<&2, K>, +st: List<&2, P.Entry<K>>, +y: K, +s: P.Status, +z: K,
+  h: {Acp(~K, ~eq, r, st, z) == True{} : Bool}
+) -> {Acp(~K, ~eq, Dr(~K, ~eq, r, y), P.Entry{y, s} <> st, z) == True{} : Bool}:
+  acc_fin.if(~K, ~eq, ~sound, ~refl, eq(z, y), r, st, y, s, z, {==}, h)
+
+def logged_finish(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), l: List<&2, K>, +r: List<&2, K>, +st: List<&2, P.Entry<K>>, +y: K, +s: P.Status,
+  h: {logged(~K, ~eq, l, r, st) == True{} : Bool}
+) -> {logged(~K, ~eq, l, Dr(~K, ~eq, r, y), P.Entry{y, s} <> st) == True{} : Bool}:
+  match l:
+    case Nil{}:
+      {==}
+    case Con{+z, +t}:
+      +h = h
+      and_true(Acp(~K, ~eq, Dr(~K, ~eq, r, y), P.Entry{y, s} <> st, z), logged(~K, ~eq, t, Dr(~K, ~eq, r, y), P.Entry{y, s} <> st),
+        acc_fin(~K, ~eq, ~sound, ~refl, r, st, y, s, z, and_l(Acp(~K, ~eq, r, st, z), logged(~K, ~eq, t, r, st), h)),
+        logged_finish(~K, ~eq, ~sound, ~refl, t, r, st, y, s, and_r(Acp(~K, ~eq, r, st, z), logged(~K, ~eq, t, r, st), h)))
+
+def fin_ne_fresh(ok: Bool, e: {P.Fin.status(ok) == P.Fresh{} : P.Status}) -> Empty:
+  match ok:
+    case True{}:
+      %e : NotFresh(_)
+      Unit{}
+    case False{}:
+      %e : NotFresh(_)
+      Unit{}
+
+# Parallel execution: decisions
+# -----------------------------
+
+def Sts(-K: Data, pool: P.Pool<K>) -> List<&2, P.Entry<K>>:
+  Laws.statuses(K, pool)
+
+def Run(-K: Data, pool: P.Pool<K>) -> List<&2, K>:
+  Laws.running(K, pool)
+
+def Log(-K: Data, pool: P.Pool<K>) -> List<&2, K>:
+  Laws.started(K, pool)
+
+# What a parallel decision tells about the pool it was made in.
+def VP(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat, +pool: P.Pool<K>, +y: K, a: P.Step) -> Type:
+  match a:
+    case P.PSkip{}:
+      {Bool.or(Maybe.is_some(&2, P.Status, St(~K, ~eq, Sts(K, pool), y)), P.member(~K, ~eq, Run(K, pool), y)) == True{} : Bool}
+    case P.PWait{}:
+      {P.le(1n, limit) == True{} : Bool} -> {Run(K, pool) == Nil{} : List<&2, K>} -> Empty
+    case P.PMark{+s}:
+      {St(~K, ~eq, Sts(K, pool), y) == None{} : Maybe<&2, P.Status>}
+      & ({P.member(~K, ~eq, Run(K, pool), y) == False{} : Bool}
+      & ((@dy: List<&2, K> -> {P.Status.selected(s) == True{} : Bool} -> {P.deps(~K, ~eq, g, y) == Some{dy} : Maybe<&2, List<&2, K>>} -> {P.ready(~K, ~eq, dy, Sts(K, pool)) == True{} : Bool})
+      & ({s == P.Fresh{} : P.Status} -> {P.member(~K, ~eq, stale, y) == False{} : Bool})))
+    case P.PStart{}:
+      {St(~K, ~eq, Sts(K, pool), y) == None{} : Maybe<&2, P.Status>}
+      & ({P.member(~K, ~eq, Run(K, pool), y) == False{} : Bool}
+      & ((@dy: List<&2, K> -> {P.deps(~K, ~eq, g, y) == Some{dy} : Maybe<&2, List<&2, K>>} -> {P.ready(~K, ~eq, dy, Sts(K, pool)) == True{} : Bool})
+      & {P.le(1n+Ln(K, Run(K, pool)), limit) == True{} : Bool}))
+
+def vp.skip(
+  ~K: Data, ~eq: K -> K -> Bool, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, +y: K,
+  hn: {St(~K, ~eq, st, y) == None{} : Maybe<&2, P.Status>}, hm: {P.member(~K, ~eq, r, y) == False{} : Bool}
+) -> VP(~K, ~eq, g, stale, limit, P.Pool{st, r, l}, y, P.PMark{P.Skipped{}}):
+  (hn, (hm, (dy => hs => hd => Empty.absurd({P.ready(~K, ~eq, dy, st) == True{} : Bool}, false_ne_true(hs)),
+    e => Empty.absurd({P.member(~K, ~eq, stale, y) == False{} : Bool}, skipped_ne_fresh(e)))))
+
+def vp.room(
+  ~K: Data, ~eq: K -> K -> Bool, room: Bool, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, +y: K, +ds: List<&2, K>,
+  hroom: {P.le(1n+Ln(K, r), limit) == room : Bool}, +hds: {P.deps(~K, ~eq, g, y) == Some{ds} : Maybe<&2, List<&2, K>>},
+  +hgo: {P.ready(~K, ~eq, ds, st) == True{} : Bool}, hn: {St(~K, ~eq, st, y) == None{} : Maybe<&2, P.Status>}, hm: {P.member(~K, ~eq, r, y) == False{} : Bool}
+) -> VP(~K, ~eq, g, stale, limit, P.Pool{st, r, l}, y, P.decide.par.room(room)):
+  match room:
+    case True{}:
+      (hn, (hm, (dy => hd => ready_move(~K, ~eq, g, st, y, ds, dy, hds, hd, hgo), hroom)))
+    case False{}:
+      hl => hr0 => clash(P.le(1n, limit), hl, (%hr0 : {P.le(1n+Ln(K, _), limit) == False{} : Bool} hroom))
+
+def vp.go(
+  ~K: Data, ~eq: K -> K -> Bool, go: Bool, sx: Bool, room: Bool, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, +y: K, +ds: List<&2, K>,
+  +hgo: {P.ready(~K, ~eq, ds, st) == go : Bool}, hsx: {P.member(~K, ~eq, stale, y) == sx : Bool},
+  hroom: {P.le(1n+Ln(K, r), limit) == room : Bool}, +hds: {P.deps(~K, ~eq, g, y) == Some{ds} : Maybe<&2, List<&2, K>>},
+  +hn: {St(~K, ~eq, st, y) == None{} : Maybe<&2, P.Status>}, +hm: {P.member(~K, ~eq, r, y) == False{} : Bool}
+) -> VP(~K, ~eq, g, stale, limit, P.Pool{st, r, l}, y, P.decide.par.go(go, sx, room)):
+  match go:
+    case False{}:
+      vp.skip(~K, ~eq, g, stale, limit, st, r, l, y, hn, hm)
+    case True{}:
+      match sx:
+        case False{}:
+          (hn, (hm, (dy => hs => hd => ready_move(~K, ~eq, g, st, y, ds, dy, hds, hd, hgo), e => hsx)))
+        case True{}:
+          vp.room(~K, ~eq, room, g, stale, limit, st, r, l, y, ds, hroom, hds, hgo, hn, hm)
+
+def vp.wait(
+  ~K: Data, ~eq: K -> K -> Bool, busy: Bool, go: Bool, sx: Bool, room: Bool, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, +y: K, +ds: List<&2, K>,
+  hbusy: {P.any_in(~K, ~eq, ds, r) == busy : Bool}, hgo: {P.ready(~K, ~eq, ds, st) == go : Bool}, hsx: {P.member(~K, ~eq, stale, y) == sx : Bool},
+  hroom: {P.le(1n+Ln(K, r), limit) == room : Bool}, hds: {P.deps(~K, ~eq, g, y) == Some{ds} : Maybe<&2, List<&2, K>>},
+  hn: {St(~K, ~eq, st, y) == None{} : Maybe<&2, P.Status>}, hm: {P.member(~K, ~eq, r, y) == False{} : Bool}
+) -> VP(~K, ~eq, g, stale, limit, P.Pool{st, r, l}, y, P.decide.par.wait(busy, go, sx, room)):
+  match busy:
+    case True{}:
+      hl => hr0 => clash(P.any_in(~K, ~eq, ds, Nil{}), (%hr0 : {P.any_in(~K, ~eq, ds, _) == True{} : Bool} hbusy), any_nil(~K, ~eq, ds))
+    case False{}:
+      vp.go(~K, ~eq, go, sx, room, g, stale, limit, st, r, l, y, ds, hgo, hsx, hroom, hds, hn, hm)
+
+def vp.node(
+  ~K: Data, ~eq: K -> K -> Bool, m: Maybe<&2, List<&2, K>>, sx: Bool, room: Bool, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, +y: K,
+  hmm: {P.deps(~K, ~eq, g, y) == m : Maybe<&2, List<&2, K>>}, hsx: {P.member(~K, ~eq, stale, y) == sx : Bool},
+  hroom: {P.le(1n+Ln(K, r), limit) == room : Bool},
+  hn: {St(~K, ~eq, st, y) == None{} : Maybe<&2, P.Status>}, hm: {P.member(~K, ~eq, r, y) == False{} : Bool}
+) -> VP(~K, ~eq, g, stale, limit, P.Pool{st, r, l}, y, P.decide.par.node(~K, ~eq, m, st, r, sx, room)):
+  match m:
+    case None{}:
+      vp.skip(~K, ~eq, g, stale, limit, st, r, l, y, hn, hm)
+    case Some{+ds}:
+      vp.wait(~K, ~eq, P.any_in(~K, ~eq, ds, r), P.ready(~K, ~eq, ds, st), sx, room, g, stale, limit, st, r, l, y, ds,
+        {==}, {==}, hsx, hroom, hmm, hn, hm)
+
+def vp.seen(
+  ~K: Data, ~eq: K -> K -> Bool, b: Bool, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, +y: K,
+  +hb: {Bool.or(Maybe.is_some(&2, P.Status, St(~K, ~eq, st, y)), P.member(~K, ~eq, r, y)) == b : Bool}
+) -> VP(~K, ~eq, g, stale, limit, P.Pool{st, r, l}, y, P.decide.par.seen(~K, ~eq, b, g, stale, limit, st, r, y)):
+  match b:
+    case True{}:
+      hb
+    case False{}:
+      +so = Maybe.is_some(&2, P.Status, St(~K, ~eq, st, y))
+      vp.node(~K, ~eq, P.deps(~K, ~eq, g, y), P.member(~K, ~eq, stale, y), P.le(1n+Ln(K, r), limit), g, stale, limit, st, r, l, y,
+        {==}, {==}, {==}, none_of(St(~K, ~eq, st, y), or_false_l2(so, P.member(~K, ~eq, r, y), hb)), or_false_r(so, P.member(~K, ~eq, r, y), hb))
+
+def view.par(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat, pool: P.Pool<K>, +y: K) ->
+  VP(~K, ~eq, g, stale, limit, pool, y, P.decide.par(~K, ~eq, g, stale, limit, pool, y)):
+  match pool:
+    case P.Pool{+st, +r, +l}:
+      vp.seen(~K, ~eq, Bool.or(Maybe.is_some(&2, P.Status, St(~K, ~eq, st, y)), P.member(~K, ~eq, r, y)), g, stale, limit, st, r, l, y, {==})
+
+# Parallel execution: invariants
+# ------------------------------
+
+def GAc(~K: Data, ~eq: K -> K -> Bool, +limit: Nat, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>) -> Bool:
+  Bool.and(none_all(~K, ~eq, r, st), Bool.and(P.distinct(~K, ~eq, P.keys(K, st)), Bool.and(P.distinct(~K, ~eq, l),
+    Bool.and(logged(~K, ~eq, l, r, st), P.le(Ln(K, r), limit)))))
+
+def GA(~K: Data, ~eq: K -> K -> Bool, +limit: Nat, +pool: P.Pool<K>) -> Type:
+  {GAc(~K, ~eq, limit, Sts(K, pool), Run(K, pool), Log(K, pool)) == True{} : Bool}
+
+def mk_ga(~K: Data, ~eq: K -> K -> Bool, +limit: Nat, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>,
+  h1: {none_all(~K, ~eq, r, st) == True{} : Bool}, h2: {P.distinct(~K, ~eq, P.keys(K, st)) == True{} : Bool},
+  h3: {P.distinct(~K, ~eq, l) == True{} : Bool}, h4: {logged(~K, ~eq, l, r, st) == True{} : Bool}, h5: {P.le(Ln(K, r), limit) == True{} : Bool}
+) -> {GAc(~K, ~eq, limit, st, r, l) == True{} : Bool}:
+  and_true(none_all(~K, ~eq, r, st), Bool.and(P.distinct(~K, ~eq, P.keys(K, st)), Bool.and(P.distinct(~K, ~eq, l), Bool.and(logged(~K, ~eq, l, r, st), P.le(Ln(K, r), limit)))), h1,
+    and_true(P.distinct(~K, ~eq, P.keys(K, st)), Bool.and(P.distinct(~K, ~eq, l), Bool.and(logged(~K, ~eq, l, r, st), P.le(Ln(K, r), limit))), h2,
+      and_true(P.distinct(~K, ~eq, l), Bool.and(logged(~K, ~eq, l, r, st), P.le(Ln(K, r), limit)), h3,
+        and_true(logged(~K, ~eq, l, r, st), P.le(Ln(K, r), limit), h4, h5))))
+
+def GA4(~K: Data, ~eq: K -> K -> Bool, +limit: Nat, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>) -> Bool:
+  Bool.and(logged(~K, ~eq, l, r, st), P.le(Ln(K, r), limit))
+
+def GA3(~K: Data, ~eq: K -> K -> Bool, +limit: Nat, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>) -> Bool:
+  Bool.and(P.distinct(~K, ~eq, l), GA4(~K, ~eq, limit, st, r, l))
+
+def GA2(~K: Data, ~eq: K -> K -> Bool, +limit: Nat, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>) -> Bool:
+  Bool.and(P.distinct(~K, ~eq, P.keys(K, st)), GA3(~K, ~eq, limit, st, r, l))
+
+def ga1(~K: Data, ~eq: K -> K -> Bool, +limit: Nat, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, h: {GAc(~K, ~eq, limit, st, r, l) == True{} : Bool}) ->
+  {none_all(~K, ~eq, r, st) == True{} : Bool}:
+  and_l(none_all(~K, ~eq, r, st), GA2(~K, ~eq, limit, st, r, l), h)
+
+def ga2(~K: Data, ~eq: K -> K -> Bool, +limit: Nat, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, h: {GAc(~K, ~eq, limit, st, r, l) == True{} : Bool}) ->
+  {P.distinct(~K, ~eq, P.keys(K, st)) == True{} : Bool}:
+  and_l(P.distinct(~K, ~eq, P.keys(K, st)), GA3(~K, ~eq, limit, st, r, l), and_r(none_all(~K, ~eq, r, st), GA2(~K, ~eq, limit, st, r, l), h))
+
+def ga3(~K: Data, ~eq: K -> K -> Bool, +limit: Nat, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, +h: {GAc(~K, ~eq, limit, st, r, l) == True{} : Bool}) ->
+  {P.distinct(~K, ~eq, l) == True{} : Bool}:
+  and_l(P.distinct(~K, ~eq, l), GA4(~K, ~eq, limit, st, r, l),
+    and_r(P.distinct(~K, ~eq, P.keys(K, st)), GA3(~K, ~eq, limit, st, r, l), and_r(none_all(~K, ~eq, r, st), GA2(~K, ~eq, limit, st, r, l), h)))
+
+def ga45(~K: Data, ~eq: K -> K -> Bool, +limit: Nat, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, +h: {GAc(~K, ~eq, limit, st, r, l) == True{} : Bool}) ->
+  {GA4(~K, ~eq, limit, st, r, l) == True{} : Bool}:
+  and_r(P.distinct(~K, ~eq, l), GA4(~K, ~eq, limit, st, r, l),
+    and_r(P.distinct(~K, ~eq, P.keys(K, st)), GA3(~K, ~eq, limit, st, r, l), and_r(none_all(~K, ~eq, r, st), GA2(~K, ~eq, limit, st, r, l), h)))
+
+def ga4(~K: Data, ~eq: K -> K -> Bool, +limit: Nat, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, +h: {GAc(~K, ~eq, limit, st, r, l) == True{} : Bool}) ->
+  {logged(~K, ~eq, l, r, st) == True{} : Bool}:
+  and_l(logged(~K, ~eq, l, r, st), P.le(Ln(K, r), limit), ga45(~K, ~eq, limit, st, r, l, h))
+
+def ga5(~K: Data, ~eq: K -> K -> Bool, +limit: Nat, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, +h: {GAc(~K, ~eq, limit, st, r, l) == True{} : Bool}) ->
+  {P.le(Ln(K, r), limit) == True{} : Bool}:
+  and_r(logged(~K, ~eq, l, r, st), P.le(Ln(K, r), limit), ga45(~K, ~eq, limit, st, r, l, h))
+
+def ga_apply(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), a: P.Step, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  pool: P.Pool<K>, +y: K, hv: VP(~K, ~eq, g, stale, limit, pool, y, a), ga: GA(~K, ~eq, limit, pool)
+) -> GA(~K, ~eq, limit, P.apply(K, a, pool, y)):
+  match a:
+    case P.PSkip{}:
+      ga
+    case P.PWait{}:
+      ga
+    case P.PMark{+s}:
+      match pool:
+        case P.Pool{+st, +r, +l}:
+          (hn, h1) = hv
+          (hm, h2) = h1
+          +ga = {ga : {GAc(~K, ~eq, limit, st, r, l) == True{} : Bool}}
+          mk_ga(~K, ~eq, limit, P.Entry{y, s} <> st, r, l,
+            none_cons(~K, ~eq, ~sound, ~refl, r, st, y, s, hm, ga1(~K, ~eq, limit, st, r, l, ga)),
+            and_not_false(P.member(~K, ~eq, P.keys(K, st), y), P.distinct(~K, ~eq, P.keys(K, st)), keys_none(~K, ~eq, st, y, hn), ga2(~K, ~eq, limit, st, r, l, ga)),
+            ga3(~K, ~eq, limit, st, r, l, ga), logged_mark(~K, ~eq, l, r, st, y, s, ga4(~K, ~eq, limit, st, r, l, ga)), ga5(~K, ~eq, limit, st, r, l, ga))
+    case P.PStart{}:
+      match pool:
+        case P.Pool{+st, +r, +l}:
+          (hn, h1) = hv
+          (hm, h2) = h1
+          (hdep, hroom) = h2
+          +ga = {ga : {GAc(~K, ~eq, limit, st, r, l) == True{} : Bool}}
+          +hn = {hn : {St(~K, ~eq, st, y) == None{} : Maybe<&2, P.Status>}}
+          +hm = {hm : {P.member(~K, ~eq, r, y) == False{} : Bool}}
+          +g4 = ga4(~K, ~eq, limit, st, r, l, ga)
+          mk_ga(~K, ~eq, limit, st, y <> r, y <> l,
+            and_true(Maybe.is_none(&2, P.Status, St(~K, ~eq, st, y)), none_all(~K, ~eq, r, st), is_none_of(St(~K, ~eq, st, y), hn), ga1(~K, ~eq, limit, st, r, l, ga)),
+            ga2(~K, ~eq, limit, st, r, l, ga),
+            and_not_false(P.member(~K, ~eq, l, y), P.distinct(~K, ~eq, l), logged_not(~K, ~eq, ~sound, l, r, st, y, g4, hm, hn), ga3(~K, ~eq, limit, st, r, l, ga)),
+            logged_start(~K, ~eq, ~refl, l, r, st, y, g4), hroom)
+
+def ga_fin.if(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), b: Bool, +limit: Nat,
+  +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, +y: K, +ok: Bool,
+  hb: {P.member(~K, ~eq, r, y) == b : Bool}, ga: GA(~K, ~eq, limit, P.Pool{st, r, l})
+) -> GA(~K, ~eq, limit, P.finish.if(K, b, y, ok, st, r, Dr(~K, ~eq, r, y), l)):
+  match b:
+    case True{}:
+      +ga = {ga : {GAc(~K, ~eq, limit, st, r, l) == True{} : Bool}}
+      +g1 = ga1(~K, ~eq, limit, st, r, l, ga)
+      +s = P.Fin.status(ok)
+      +hn = none_mem(~K, ~eq, ~sound, r, st, y, g1, hb)
+      mk_ga(~K, ~eq, limit, P.Entry{y, s} <> st, Dr(~K, ~eq, r, y), l,
+        none_drop(~K, ~eq, ~sound, ~refl, r, st, y, s, g1),
+        and_not_false(P.member(~K, ~eq, P.keys(K, st), y), P.distinct(~K, ~eq, P.keys(K, st)), keys_none(~K, ~eq, st, y, hn), ga2(~K, ~eq, limit, st, r, l, ga)),
+        ga3(~K, ~eq, limit, st, r, l, ga), logged_finish(~K, ~eq, ~sound, ~refl, l, r, st, y, s, ga4(~K, ~eq, limit, st, r, l, ga)),
+        le_trans(Ln(K, Dr(~K, ~eq, r, y)), Ln(K, r), limit, len_drop(~K, ~eq, r, y), ga5(~K, ~eq, limit, st, r, l, ga)))
+    case False{}:
+      ga
+
+def ga_finish(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), +limit: Nat, pool: P.Pool<K>, e: P.Fin<K>, ga: GA(~K, ~eq, limit, pool)
+) -> GA(~K, ~eq, limit, P.finish(~K, ~eq, pool, e)):
+  match pool e:
+    case P.Pool{+st, +r, +l} P.Fin{+y, +ok}:
+      ga_fin.if(~K, ~eq, ~sound, ~refl, P.member(~K, ~eq, r, y), limit, st, r, l, y, ok, {==}, ga)
+
+def GB(~K: Data, ~eq: K -> K -> Bool, +stale: List<&2, K>, +pool: P.Pool<K>, +x: K, +ds: List<&2, K>) -> Type:
+  ({P.selected.at(St(~K, ~eq, Sts(K, pool), x)) == True{} : Bool} -> {P.ready(~K, ~eq, ds, Sts(K, pool)) == True{} : Bool})
+  & ({Bool.or(Bool.not(P.member(~K, ~eq, Run(K, pool), x)), P.ready(~K, ~eq, ds, Sts(K, pool))) == True{} : Bool}
+  & ({St(~K, ~eq, Sts(K, pool), x) == Some{P.Fresh{}} : Maybe<&2, P.Status>} -> {P.member(~K, ~eq, stale, x) == False{} : Bool}))
+
+def imp_intro(a: Bool, -b: Bool, f: {a == True{} : Bool} -> {b == True{} : Bool}) -> {Bool.or(Bool.not(a), b) == True{} : Bool}:
+  match a:
+    case True{}:
+      f({==})
+    case False{}:
+      {==}
+
+def gb_start.if(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), c: Bool, +g: List<&2, P.Node<K>>, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +y: K, +x: K, +ds: List<&2, K>,
+  hc: {eq(x, y) == c : Bool}, hd: {P.deps(~K, ~eq, g, x) == Some{ds} : Maybe<&2, List<&2, K>>},
+  hdep: @dy: List<&2, K> -> {P.deps(~K, ~eq, g, y) == Some{dy} : Maybe<&2, List<&2, K>>} -> {P.ready(~K, ~eq, dy, st) == True{} : Bool},
+  b2: {Bool.or(Bool.not(P.member(~K, ~eq, r, x)), P.ready(~K, ~eq, ds, st)) == True{} : Bool},
+  hm2: {P.member(~K, ~eq, y <> r, x) == True{} : Bool}
+) -> {P.ready(~K, ~eq, ds, st) == True{} : Bool}:
+  match c:
+    case True{}:
+      hdep(ds, deps_move(~K, ~eq, g, x, y, ds, sound(x, y, hc), hd))
+    case False{}:
+      imp_true(P.member(~K, ~eq, r, x), P.ready(~K, ~eq, ds, st), mem_tail(~K, ~eq, y, r, x, hc, hm2), b2)
+
+def gb_apply(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), a: P.Step, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  pool: P.Pool<K>, +y: K, +x: K, +ds: List<&2, K>, +hd: {P.deps(~K, ~eq, g, x) == Some{ds} : Maybe<&2, List<&2, K>>},
+  hv: VP(~K, ~eq, g, stale, limit, pool, y, a), gb: GB(~K, ~eq, stale, pool, x, ds)
+) -> GB(~K, ~eq, stale, P.apply(K, a, pool, y), x, ds):
+  match a:
+    case P.PSkip{}:
+      gb
+    case P.PWait{}:
+      gb
+    case P.PMark{+s}:
+      match pool:
+        case P.Pool{+st, +r, +l}:
+          (hn, h1) = hv
+          (hm, h2) = h1
+          (hsel, hfr) = h2
+          (b1, q) = gb
+          (b2, b3) = q
+          +hn = {hn : {St(~K, ~eq, st, y) == None{} : Maybe<&2, P.Status>}}
+          (hs => ready_step.if(~K, ~eq, ~sound, eq(x, y), g, st, y, s, x, ds, {==}, hd, hn, hsel, b1, hs),
+           (imp_intro(P.member(~K, ~eq, r, x), P.ready(~K, ~eq, ds, P.Entry{y, s} <> st),
+              hm2 => ready_keep(~K, ~eq, ~sound, ds, st, y, s, imp_true(P.member(~K, ~eq, r, x), P.ready(~K, ~eq, ds, st), hm2, b2), hn)),
+            hf => fresh_step.if(~K, ~eq, ~sound, eq(x, y), stale, st, y, s, x, {==}, hfr, b3, hf)))
+    case P.PStart{}:
+      match pool:
+        case P.Pool{+st, +r, +l}:
+          (hn, h1) = hv
+          (hm, h2) = h1
+          (hdep, hroom) = h2
+          (b1, q) = gb
+          (b2, b3) = q
+          (b1, (imp_intro(P.member(~K, ~eq, y <> r, x), P.ready(~K, ~eq, ds, st),
+             hm2 => gb_start.if(~K, ~eq, ~sound, eq(x, y), g, st, r, y, x, ds, {==}, hd, hdep, b2, hm2)), b3))
+
+def gb_fin_sel.if(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), c: Bool, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +y: K, +s: P.Status, +x: K, +ds: List<&2, K>,
+  +hc: {eq(x, y) == c : Bool}, hb: {P.member(~K, ~eq, r, y) == True{} : Bool}, +hn: {St(~K, ~eq, st, y) == None{} : Maybe<&2, P.Status>},
+  b1: {P.selected.at(St(~K, ~eq, st, x)) == True{} : Bool} -> {P.ready(~K, ~eq, ds, st) == True{} : Bool},
+  b2: {Bool.or(Bool.not(P.member(~K, ~eq, r, x)), P.ready(~K, ~eq, ds, st)) == True{} : Bool},
+  hs: {P.selected.at(St(~K, ~eq, P.Entry{y, s} <> st, x)) == True{} : Bool}
+) -> {P.ready(~K, ~eq, ds, P.Entry{y, s} <> st) == True{} : Bool}:
+  match c:
+    case True{}:
+      ready_keep(~K, ~eq, ~sound, ds, st, y, s,
+        imp_true(P.member(~K, ~eq, r, x), P.ready(~K, ~eq, ds, st), (%Equal.sym(K, x, y, sound(x, y, hc)) : {P.member(~K, ~eq, r, _) == True{} : Bool} hb), b2), hn)
+    case False{}:
+      ready_keep(~K, ~eq, ~sound, ds, st, y, s,
+        b1(%st_miss(~K, ~eq, y, s, st, x, hc) : {P.selected.at(_) == True{} : Bool} hs), hn)
+
+def gb_fin_fresh.if(
+  ~K: Data, ~eq: K -> K -> Bool, c: Bool, +stale: List<&2, K>, +st: List<&2, P.Entry<K>>, +y: K, +ok: Bool, +x: K,
+  +hc: {eq(x, y) == c : Bool},
+  b3: {St(~K, ~eq, st, x) == Some{P.Fresh{}} : Maybe<&2, P.Status>} -> {P.member(~K, ~eq, stale, x) == False{} : Bool},
+  hf: {St(~K, ~eq, P.Entry{y, P.Fin.status(ok)} <> st, x) == Some{P.Fresh{}} : Maybe<&2, P.Status>}
+) -> {P.member(~K, ~eq, stale, x) == False{} : Bool}:
+  match c:
+    case True{}:
+      Empty.absurd({P.member(~K, ~eq, stale, x) == False{} : Bool},
+        fin_ne_fresh(ok, some_inj(P.Status, P.Fin.status(ok), P.Fresh{},
+          Equal.trans(Maybe<&2, P.Status>, Some{P.Fin.status(ok)}, St(~K, ~eq, P.Entry{y, P.Fin.status(ok)} <> st, x), Some{P.Fresh{}},
+            Equal.sym(Maybe<&2, P.Status>, St(~K, ~eq, P.Entry{y, P.Fin.status(ok)} <> st, x), Some{P.Fin.status(ok)}, st_hit(~K, ~eq, y, P.Fin.status(ok), st, x, hc)), hf))))
+    case False{}:
+      b3(%st_miss(~K, ~eq, y, P.Fin.status(ok), st, x, hc) : {_ == Some{P.Fresh{}} : Maybe<&2, P.Status>} hf)
+
+def gb_fin.if(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), b: Bool, +stale: List<&2, K>,
+  +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, +y: K, +ok: Bool, +x: K, +ds: List<&2, K>,
+  +hb: {P.member(~K, ~eq, r, y) == b : Bool}, hnone: {none_all(~K, ~eq, r, st) == True{} : Bool}, gb: GB(~K, ~eq, stale, P.Pool{st, r, l}, x, ds)
+) -> GB(~K, ~eq, stale, P.finish.if(K, b, y, ok, st, r, Dr(~K, ~eq, r, y), l), x, ds):
+  match b:
+    case True{}:
+      (b1, q) = gb
+      (b2, b3) = q
+      +b2 = {b2 : {Bool.or(Bool.not(P.member(~K, ~eq, r, x)), P.ready(~K, ~eq, ds, st)) == True{} : Bool}}
+      +s = P.Fin.status(ok)
+      +hn = none_mem(~K, ~eq, ~sound, r, st, y, hnone, hb)
+      (hs => gb_fin_sel.if(~K, ~eq, ~sound, eq(x, y), st, r, y, s, x, ds, {==}, hb, hn, b1, b2, hs),
+       (imp_intro(P.member(~K, ~eq, Dr(~K, ~eq, r, y), x), P.ready(~K, ~eq, ds, P.Entry{y, s} <> st),
+          hm2 => ready_keep(~K, ~eq, ~sound, ds, st, y, s, imp_true(P.member(~K, ~eq, r, x), P.ready(~K, ~eq, ds, st), mem_drop_sub(~K, ~eq, r, y, x, hm2), b2), hn)),
+        hf => gb_fin_fresh.if(~K, ~eq, eq(x, y), stale, st, y, ok, x, {==}, b3, hf)))
+    case False{}:
+      gb
+
+
+def gb_finish(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), +stale: List<&2, K>, +limit: Nat, pool: P.Pool<K>, e: P.Fin<K>, +x: K, +ds: List<&2, K>,
+  ga: GA(~K, ~eq, limit, pool), gb: GB(~K, ~eq, stale, pool, x, ds)
+) -> GB(~K, ~eq, stale, P.finish(~K, ~eq, pool, e), x, ds):
+  match pool e:
+    case P.Pool{+st, +r, +l} P.Fin{+y, +ok}:
+      gb_fin.if(~K, ~eq, ~sound, ~refl, P.member(~K, ~eq, r, y), stale, st, r, l, y, ok, x, ds, {==},
+        ga1(~K, ~eq, limit, st, r, l, ga), gb)
+
+# Parallel execution: induction
+# -----------------------------
+
+def PAR(~K: Data, ~eq: K -> K -> Bool, es: List<&2, P.Fin<K>>, p: List<&2, K>, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat, +pool: P.Pool<K>) -> P.Pool<K>:
+  P.par(~K, ~eq, es, p, g, stale, limit, pool)
+
+def ga.at0(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), a: P.Step, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  +pool: P.Pool<K>, +y: K, +t: List<&2, K>, hv: VP(~K, ~eq, g, stale, limit, pool, y, a), ga: GA(~K, ~eq, limit, pool),
+  ih: @q: P.Pool<K> -> GA(~K, ~eq, limit, q) -> GA(~K, ~eq, limit, PAR(~K, ~eq, Nil{}, t, g, stale, limit, q))
+) -> GA(~K, ~eq, limit, P.par.at(P.Pool<K>, a, u => pool, u => P.par(~K, ~eq, Nil{}, t, g, stale, limit, P.apply(K, a, pool, y)))):
+  match a:
+    case P.PWait{}:
+      ga
+    case P.PSkip{}:
+      ih(P.apply(K, P.PSkip{}, pool, y), ga_apply(~K, ~eq, ~sound, ~refl, P.PSkip{}, g, stale, limit, pool, y, hv, ga))
+    case P.PMark{+s}:
+      ih(P.apply(K, P.PMark{s}, pool, y), ga_apply(~K, ~eq, ~sound, ~refl, P.PMark{s}, g, stale, limit, pool, y, hv, ga))
+    case P.PStart{}:
+      ih(P.apply(K, P.PStart{}, pool, y), ga_apply(~K, ~eq, ~sound, ~refl, P.PStart{}, g, stale, limit, pool, y, hv, ga))
+
+def ga.at1(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), a: P.Step, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  +pool: P.Pool<K>, +e: P.Fin<K>, +r: List<&2, P.Fin<K>>, +y: K, +t: List<&2, K>, hv: VP(~K, ~eq, g, stale, limit, pool, y, a), ga: GA(~K, ~eq, limit, pool),
+  ihw: GA(~K, ~eq, limit, PAR(~K, ~eq, r, y <> t, g, stale, limit, P.finish(~K, ~eq, pool, e))),
+  ih: @q: P.Pool<K> -> GA(~K, ~eq, limit, q) -> GA(~K, ~eq, limit, PAR(~K, ~eq, e <> r, t, g, stale, limit, q))
+) -> GA(~K, ~eq, limit, P.par.at(P.Pool<K>, a,
+    u => P.par(~K, ~eq, r, y <> t, g, stale, limit, P.finish(~K, ~eq, pool, e)),
+    u => P.par(~K, ~eq, e <> r, t, g, stale, limit, P.apply(K, a, pool, y)))):
+  match a:
+    case P.PWait{}:
+      ihw
+    case P.PSkip{}:
+      ih(P.apply(K, P.PSkip{}, pool, y), ga_apply(~K, ~eq, ~sound, ~refl, P.PSkip{}, g, stale, limit, pool, y, hv, ga))
+    case P.PMark{+s}:
+      ih(P.apply(K, P.PMark{s}, pool, y), ga_apply(~K, ~eq, ~sound, ~refl, P.PMark{s}, g, stale, limit, pool, y, hv, ga))
+    case P.PStart{}:
+      ih(P.apply(K, P.PStart{}, pool, y), ga_apply(~K, ~eq, ~sound, ~refl, P.PStart{}, g, stale, limit, pool, y, hv, ga))
+
+def par_ga(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), es: List<&2, P.Fin<K>>, p: List<&2, K>,
+  +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat, +pool: P.Pool<K>, ga: GA(~K, ~eq, limit, pool)
+) -> GA(~K, ~eq, limit, PAR(~K, ~eq, es, p, g, stale, limit, pool)):
+  match es:
+    case Nil{}:
+      match p:
+        case Nil{}:
+          ga
+        case Con{+y, +t}:
+          ga.at0(~K, ~eq, ~sound, ~refl, P.decide.par(~K, ~eq, g, stale, limit, pool, y), g, stale, limit, pool, y, t,
+            view.par(~K, ~eq, g, stale, limit, pool, y), ga, q => h => par_ga(~K, ~eq, ~sound, ~refl, Nil{}, t, g, stale, limit, q, h))
+    case Con{+e, +r}:
+      match p:
+        case Nil{}:
+          par_ga(~K, ~eq, ~sound, ~refl, r, Nil{}, g, stale, limit, P.finish(~K, ~eq, pool, e), ga_finish(~K, ~eq, ~sound, ~refl, limit, pool, e, ga))
+        case Con{+y, +t}:
+          +ga = {ga : {GAc(~K, ~eq, limit, Sts(K, pool), Run(K, pool), Log(K, pool)) == True{} : Bool}}
+          ga.at1(~K, ~eq, ~sound, ~refl, P.decide.par(~K, ~eq, g, stale, limit, pool, y), g, stale, limit, pool, e, r, y, t,
+            view.par(~K, ~eq, g, stale, limit, pool, y), ga,
+            par_ga(~K, ~eq, ~sound, ~refl, r, y <> t, g, stale, limit, P.finish(~K, ~eq, pool, e), ga_finish(~K, ~eq, ~sound, ~refl, limit, pool, e, ga)),
+            q => h => par_ga(~K, ~eq, ~sound, ~refl, e <> r, t, g, stale, limit, q, h))
+
+def GAB(~K: Data, ~eq: K -> K -> Bool, +stale: List<&2, K>, +limit: Nat, +pool: P.Pool<K>, +x: K, +ds: List<&2, K>) -> Type:
+  GA(~K, ~eq, limit, pool) & GB(~K, ~eq, stale, pool, x, ds)
+
+def gab_apply(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), +a: P.Step, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  +pool: P.Pool<K>, +y: K, +x: K, +ds: List<&2, K>, +hd: {P.deps(~K, ~eq, g, x) == Some{ds} : Maybe<&2, List<&2, K>>},
+  hva: VP(~K, ~eq, g, stale, limit, pool, y, a), hvb: VP(~K, ~eq, g, stale, limit, pool, y, a), h: GAB(~K, ~eq, stale, limit, pool, x, ds)
+) -> GAB(~K, ~eq, stale, limit, P.apply(K, a, pool, y), x, ds):
+  (ga, gb) = h
+  (ga_apply(~K, ~eq, ~sound, ~refl, a, g, stale, limit, pool, y, hva, ga), gb_apply(~K, ~eq, ~sound, a, g, stale, limit, pool, y, x, ds, hd, hvb, gb))
+
+def gab_finish(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), +stale: List<&2, K>, +limit: Nat, +pool: P.Pool<K>, +e: P.Fin<K>, +x: K, +ds: List<&2, K>,
+  h: GAB(~K, ~eq, stale, limit, pool, x, ds)
+) -> GAB(~K, ~eq, stale, limit, P.finish(~K, ~eq, pool, e), x, ds):
+  (ga0, gb) = h
+  +ga = {ga0 : {GAc(~K, ~eq, limit, Sts(K, pool), Run(K, pool), Log(K, pool)) == True{} : Bool}}
+  (ga_finish(~K, ~eq, ~sound, ~refl, limit, pool, e, ga), gb_finish(~K, ~eq, ~sound, ~refl, stale, limit, pool, e, x, ds, ga, gb))
+
+def gab.at0(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), a: P.Step, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  +pool: P.Pool<K>, +y: K, +t: List<&2, K>, +x: K, +ds: List<&2, K>, +hd: {P.deps(~K, ~eq, g, x) == Some{ds} : Maybe<&2, List<&2, K>>},
+  hva: VP(~K, ~eq, g, stale, limit, pool, y, a), hvb: VP(~K, ~eq, g, stale, limit, pool, y, a), h: GAB(~K, ~eq, stale, limit, pool, x, ds),
+  ih: @q: P.Pool<K> -> GAB(~K, ~eq, stale, limit, q, x, ds) -> GAB(~K, ~eq, stale, limit, PAR(~K, ~eq, Nil{}, t, g, stale, limit, q), x, ds)
+) -> GAB(~K, ~eq, stale, limit, P.par.at(P.Pool<K>, a, u => pool, u => P.par(~K, ~eq, Nil{}, t, g, stale, limit, P.apply(K, a, pool, y))), x, ds):
+  match a:
+    case P.PWait{}:
+      h
+    case P.PSkip{}:
+      ih(P.apply(K, P.PSkip{}, pool, y), gab_apply(~K, ~eq, ~sound, ~refl, P.PSkip{}, g, stale, limit, pool, y, x, ds, hd, hva, hvb, h))
+    case P.PMark{+s}:
+      ih(P.apply(K, P.PMark{s}, pool, y), gab_apply(~K, ~eq, ~sound, ~refl, P.PMark{s}, g, stale, limit, pool, y, x, ds, hd, hva, hvb, h))
+    case P.PStart{}:
+      ih(P.apply(K, P.PStart{}, pool, y), gab_apply(~K, ~eq, ~sound, ~refl, P.PStart{}, g, stale, limit, pool, y, x, ds, hd, hva, hvb, h))
+
+def gab.at1(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), a: P.Step, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  +pool: P.Pool<K>, +e: P.Fin<K>, +r: List<&2, P.Fin<K>>, +y: K, +t: List<&2, K>, +x: K, +ds: List<&2, K>, +hd: {P.deps(~K, ~eq, g, x) == Some{ds} : Maybe<&2, List<&2, K>>},
+  hva: VP(~K, ~eq, g, stale, limit, pool, y, a), hvb: VP(~K, ~eq, g, stale, limit, pool, y, a), h: GAB(~K, ~eq, stale, limit, pool, x, ds),
+  ihw: GAB(~K, ~eq, stale, limit, P.finish(~K, ~eq, pool, e), x, ds) -> GAB(~K, ~eq, stale, limit, PAR(~K, ~eq, r, y <> t, g, stale, limit, P.finish(~K, ~eq, pool, e)), x, ds),
+  ih: @q: P.Pool<K> -> GAB(~K, ~eq, stale, limit, q, x, ds) -> GAB(~K, ~eq, stale, limit, PAR(~K, ~eq, e <> r, t, g, stale, limit, q), x, ds)
+) -> GAB(~K, ~eq, stale, limit, P.par.at(P.Pool<K>, a,
+    u => P.par(~K, ~eq, r, y <> t, g, stale, limit, P.finish(~K, ~eq, pool, e)),
+    u => P.par(~K, ~eq, e <> r, t, g, stale, limit, P.apply(K, a, pool, y))), x, ds):
+  match a:
+    case P.PWait{}:
+      ihw(gab_finish(~K, ~eq, ~sound, ~refl, stale, limit, pool, e, x, ds, h))
+    case P.PSkip{}:
+      ih(P.apply(K, P.PSkip{}, pool, y), gab_apply(~K, ~eq, ~sound, ~refl, P.PSkip{}, g, stale, limit, pool, y, x, ds, hd, hva, hvb, h))
+    case P.PMark{+s}:
+      ih(P.apply(K, P.PMark{s}, pool, y), gab_apply(~K, ~eq, ~sound, ~refl, P.PMark{s}, g, stale, limit, pool, y, x, ds, hd, hva, hvb, h))
+    case P.PStart{}:
+      ih(P.apply(K, P.PStart{}, pool, y), gab_apply(~K, ~eq, ~sound, ~refl, P.PStart{}, g, stale, limit, pool, y, x, ds, hd, hva, hvb, h))
+
+def par_gab(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), es: List<&2, P.Fin<K>>, p: List<&2, K>,
+  +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat, +pool: P.Pool<K>, +x: K, +ds: List<&2, K>,
+  +hd: {P.deps(~K, ~eq, g, x) == Some{ds} : Maybe<&2, List<&2, K>>}, h: GAB(~K, ~eq, stale, limit, pool, x, ds)
+) -> GAB(~K, ~eq, stale, limit, PAR(~K, ~eq, es, p, g, stale, limit, pool), x, ds):
+  match es:
+    case Nil{}:
+      match p:
+        case Nil{}:
+          h
+        case Con{+y, +t}:
+          gab.at0(~K, ~eq, ~sound, ~refl, P.decide.par(~K, ~eq, g, stale, limit, pool, y), g, stale, limit, pool, y, t, x, ds, hd,
+            view.par(~K, ~eq, g, stale, limit, pool, y), view.par(~K, ~eq, g, stale, limit, pool, y), h,
+            q => hh => par_gab(~K, ~eq, ~sound, ~refl, Nil{}, t, g, stale, limit, q, x, ds, hd, hh))
+    case Con{+e, +r}:
+      match p:
+        case Nil{}:
+          par_gab(~K, ~eq, ~sound, ~refl, r, Nil{}, g, stale, limit, P.finish(~K, ~eq, pool, e), x, ds, hd,
+            gab_finish(~K, ~eq, ~sound, ~refl, stale, limit, pool, e, x, ds, h))
+        case Con{+y, +t}:
+          gab.at1(~K, ~eq, ~sound, ~refl, P.decide.par(~K, ~eq, g, stale, limit, pool, y), g, stale, limit, pool, e, r, y, t, x, ds, hd,
+            view.par(~K, ~eq, g, stale, limit, pool, y), view.par(~K, ~eq, g, stale, limit, pool, y), h,
+            hh => par_gab(~K, ~eq, ~sound, ~refl, r, y <> t, g, stale, limit, P.finish(~K, ~eq, pool, e), x, ds, hd, hh),
+            q => hh => par_gab(~K, ~eq, ~sound, ~refl, e <> r, t, g, stale, limit, q, x, ds, hd, hh))
+
+def GF(~K: Data, ~eq: K -> K -> Bool, +stale: List<&2, K>, +pool: P.Pool<K>, +x: K) -> Type:
+  {St(~K, ~eq, Sts(K, pool), x) == Some{P.Fresh{}} : Maybe<&2, P.Status>} -> {P.member(~K, ~eq, stale, x) == False{} : Bool}
+
+def gf_apply(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), a: P.Step, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  pool: P.Pool<K>, +y: K, +x: K, hv: VP(~K, ~eq, g, stale, limit, pool, y, a), gf: GF(~K, ~eq, stale, pool, x)
+) -> GF(~K, ~eq, stale, P.apply(K, a, pool, y), x):
+  match a:
+    case P.PSkip{}:
+      gf
+    case P.PWait{}:
+      gf
+    case P.PMark{+s}:
+      match pool:
+        case P.Pool{+st, +r, +l}:
+          (hn, h1) = hv
+          (hm, h2) = h1
+          (hsel, hfr) = h2
+          hf => fresh_step.if(~K, ~eq, ~sound, eq(x, y), stale, st, y, s, x, {==}, hfr, gf, hf)
+    case P.PStart{}:
+      match pool:
+        case P.Pool{+st, +r, +l}:
+          gf
+
+def gf_fin.if(~K: Data, ~eq: K -> K -> Bool, b: Bool, +stale: List<&2, K>, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, +y: K, +ok: Bool, +x: K,
+  gf: GF(~K, ~eq, stale, P.Pool{st, r, l}, x)
+) -> GF(~K, ~eq, stale, P.finish.if(K, b, y, ok, st, r, Dr(~K, ~eq, r, y), l), x):
+  match b:
+    case True{}:
+      hf => gb_fin_fresh.if(~K, ~eq, eq(x, y), stale, st, y, ok, x, {==}, gf, hf)
+    case False{}:
+      gf
+
+def gf_finish(~K: Data, ~eq: K -> K -> Bool, +stale: List<&2, K>, pool: P.Pool<K>, e: P.Fin<K>, +x: K, gf: GF(~K, ~eq, stale, pool, x)) ->
+  GF(~K, ~eq, stale, P.finish(~K, ~eq, pool, e), x):
+  match pool e:
+    case P.Pool{+st, +r, +l} P.Fin{+y, +ok}:
+      gf_fin.if(~K, ~eq, P.member(~K, ~eq, r, y), stale, st, r, l, y, ok, x, gf)
+
+def gf.at0(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), a: P.Step, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  +pool: P.Pool<K>, +y: K, +t: List<&2, K>, +x: K, hv: VP(~K, ~eq, g, stale, limit, pool, y, a), h: GF(~K, ~eq, stale, pool, x),
+  ih: @q: P.Pool<K> -> GF(~K, ~eq, stale, q, x) -> GF(~K, ~eq, stale, PAR(~K, ~eq, Nil{}, t, g, stale, limit, q), x)
+) -> GF(~K, ~eq, stale, P.par.at(P.Pool<K>, a, u => pool, u => P.par(~K, ~eq, Nil{}, t, g, stale, limit, P.apply(K, a, pool, y))), x):
+  match a:
+    case P.PWait{}:
+      h
+    case P.PSkip{}:
+      ih(P.apply(K, P.PSkip{}, pool, y), gf_apply(~K, ~eq, ~sound, P.PSkip{}, g, stale, limit, pool, y, x, hv, h))
+    case P.PMark{+s}:
+      ih(P.apply(K, P.PMark{s}, pool, y), gf_apply(~K, ~eq, ~sound, P.PMark{s}, g, stale, limit, pool, y, x, hv, h))
+    case P.PStart{}:
+      ih(P.apply(K, P.PStart{}, pool, y), gf_apply(~K, ~eq, ~sound, P.PStart{}, g, stale, limit, pool, y, x, hv, h))
+
+def gf.at1(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), a: P.Step, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  +pool: P.Pool<K>, +e: P.Fin<K>, +r: List<&2, P.Fin<K>>, +y: K, +t: List<&2, K>, +x: K, hv: VP(~K, ~eq, g, stale, limit, pool, y, a), h: GF(~K, ~eq, stale, pool, x),
+  ihw: GF(~K, ~eq, stale, P.finish(~K, ~eq, pool, e), x) -> GF(~K, ~eq, stale, PAR(~K, ~eq, r, y <> t, g, stale, limit, P.finish(~K, ~eq, pool, e)), x),
+  ih: @q: P.Pool<K> -> GF(~K, ~eq, stale, q, x) -> GF(~K, ~eq, stale, PAR(~K, ~eq, e <> r, t, g, stale, limit, q), x)
+) -> GF(~K, ~eq, stale, P.par.at(P.Pool<K>, a,
+    u => P.par(~K, ~eq, r, y <> t, g, stale, limit, P.finish(~K, ~eq, pool, e)),
+    u => P.par(~K, ~eq, e <> r, t, g, stale, limit, P.apply(K, a, pool, y))), x):
+  match a:
+    case P.PWait{}:
+      ihw(gf_finish(~K, ~eq, stale, pool, e, x, h))
+    case P.PSkip{}:
+      ih(P.apply(K, P.PSkip{}, pool, y), gf_apply(~K, ~eq, ~sound, P.PSkip{}, g, stale, limit, pool, y, x, hv, h))
+    case P.PMark{+s}:
+      ih(P.apply(K, P.PMark{s}, pool, y), gf_apply(~K, ~eq, ~sound, P.PMark{s}, g, stale, limit, pool, y, x, hv, h))
+    case P.PStart{}:
+      ih(P.apply(K, P.PStart{}, pool, y), gf_apply(~K, ~eq, ~sound, P.PStart{}, g, stale, limit, pool, y, x, hv, h))
+
+def par_gf(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), es: List<&2, P.Fin<K>>, p: List<&2, K>,
+  +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat, +pool: P.Pool<K>, +x: K, h: GF(~K, ~eq, stale, pool, x)
+) -> GF(~K, ~eq, stale, PAR(~K, ~eq, es, p, g, stale, limit, pool), x):
+  match es:
+    case Nil{}:
+      match p:
+        case Nil{}:
+          h
+        case Con{+y, +t}:
+          gf.at0(~K, ~eq, ~sound, P.decide.par(~K, ~eq, g, stale, limit, pool, y), g, stale, limit, pool, y, t, x,
+            view.par(~K, ~eq, g, stale, limit, pool, y), h, q => hh => par_gf(~K, ~eq, ~sound, Nil{}, t, g, stale, limit, q, x, hh))
+    case Con{+e, +r}:
+      match p:
+        case Nil{}:
+          par_gf(~K, ~eq, ~sound, r, Nil{}, g, stale, limit, P.finish(~K, ~eq, pool, e), x, gf_finish(~K, ~eq, stale, pool, e, x, h))
+        case Con{+y, +t}:
+          gf.at1(~K, ~eq, ~sound, P.decide.par(~K, ~eq, g, stale, limit, pool, y), g, stale, limit, pool, e, r, y, t, x,
+            view.par(~K, ~eq, g, stale, limit, pool, y), h,
+            hh => par_gf(~K, ~eq, ~sound, r, y <> t, g, stale, limit, P.finish(~K, ~eq, pool, e), x, hh),
+            q => hh => par_gf(~K, ~eq, ~sound, e <> r, t, g, stale, limit, q, x, hh))
+
+# Parallel execution: totality
+# ----------------------------
+
+def AP(~K: Data, ~eq: K -> K -> Bool, +pool: P.Pool<K>, +x: K) -> Bool:
+  Acp(~K, ~eq, Run(K, pool), Sts(K, pool), x)
+
+def acc_apply(~K: Data, ~eq: K -> K -> Bool, a: P.Step, pool: P.Pool<K>, +y: K, +x: K, h: {AP(~K, ~eq, pool, x) == True{} : Bool}) ->
+  {AP(~K, ~eq, P.apply(K, a, pool, y), x) == True{} : Bool}:
+  match a:
+    case P.PSkip{}:
+      h
+    case P.PWait{}:
+      h
+    case P.PMark{+s}:
+      match pool:
+        case P.Pool{+st, +r, +l}:
+          or_mono(P.member(~K, ~eq, r, x), Maybe.is_some(&2, P.Status, St(~K, ~eq, st, x)), Maybe.is_some(&2, P.Status, St(~K, ~eq, P.Entry{y, s} <> st, x)), h,
+            f => some_keep.if(~K, ~eq, eq(x, y), y, s, st, x, {==}, f))
+    case P.PStart{}:
+      match pool:
+        case P.Pool{+st, +r, +l}:
+          or_mono_l(P.member(~K, ~eq, r, x), Maybe.is_some(&2, P.Status, St(~K, ~eq, st, x)), P.member(~K, ~eq, y <> r, x), h,
+            f => mem_cons_r(~K, ~eq, y, r, x, f))
+
+def acc_fin2.if(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), b: Bool, +st: List<&2, P.Entry<K>>, +r: List<&2, K>, +l: List<&2, K>, +y: K, +ok: Bool, +x: K,
+  h: {Acp(~K, ~eq, r, st, x) == True{} : Bool}
+) -> {AP(~K, ~eq, P.finish.if(K, b, y, ok, st, r, Dr(~K, ~eq, r, y), l), x) == True{} : Bool}:
+  match b:
+    case True{}:
+      acc_fin(~K, ~eq, ~sound, ~refl, r, st, y, P.Fin.status(ok), x, h)
+    case False{}:
+      h
+
+def acc_finish(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), pool: P.Pool<K>, e: P.Fin<K>, +x: K,
+  h: {AP(~K, ~eq, pool, x) == True{} : Bool}
+) -> {AP(~K, ~eq, P.finish(~K, ~eq, pool, e), x) == True{} : Bool}:
+  match pool e:
+    case P.Pool{+st, +r, +l} P.Fin{+y, +ok}:
+      acc_fin2.if(~K, ~eq, ~sound, ~refl, P.member(~K, ~eq, r, y), st, r, l, y, ok, x, h)
+
+def tt.next.if(
+  ~K: Data, ~eq: K -> K -> Bool, c: Bool, +a: P.Step, +pool: P.Pool<K>, +y: K, +t: List<&2, K>, +x: K,
+  hc: {eq(x, y) == c : Bool}, h: {Bool.or(P.member(~K, ~eq, y <> t, x), AP(~K, ~eq, pool, x)) == True{} : Bool},
+  head: {eq(x, y) == True{} : Bool} -> {AP(~K, ~eq, P.apply(K, a, pool, y), x) == True{} : Bool}
+) -> {Bool.or(P.member(~K, ~eq, t, x), AP(~K, ~eq, P.apply(K, a, pool, y), x)) == True{} : Bool}:
+  match c:
+    case True{}:
+      or_true_r(P.member(~K, ~eq, t, x), AP(~K, ~eq, P.apply(K, a, pool, y), x), head(hc))
+    case False{}:
+      or_mono(P.member(~K, ~eq, t, x), AP(~K, ~eq, pool, x), AP(~K, ~eq, P.apply(K, a, pool, y), x),
+        (%mem_miss(~K, ~eq, y, t, x, hc) : {Bool.or(_, AP(~K, ~eq, pool, x)) == True{} : Bool} h),
+        f => acc_apply(~K, ~eq, a, pool, y, x, f))
+
+def tt.next(
+  ~K: Data, ~eq: K -> K -> Bool, +a: P.Step, +pool: P.Pool<K>, +y: K, +t: List<&2, K>, +x: K,
+  h: {Bool.or(P.member(~K, ~eq, y <> t, x), AP(~K, ~eq, pool, x)) == True{} : Bool},
+  head: {eq(x, y) == True{} : Bool} -> {AP(~K, ~eq, P.apply(K, a, pool, y), x) == True{} : Bool}
+) -> {Bool.or(P.member(~K, ~eq, t, x), AP(~K, ~eq, P.apply(K, a, pool, y), x)) == True{} : Bool}:
+  tt.next.if(~K, ~eq, eq(x, y), a, pool, y, t, x, {==}, h, head)
+
+def head_skip(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), pool: P.Pool<K>, +y: K, +x: K, hxy: {eq(x, y) == True{} : Bool},
+  hv: {Bool.or(Maybe.is_some(&2, P.Status, St(~K, ~eq, Sts(K, pool), y)), P.member(~K, ~eq, Run(K, pool), y)) == True{} : Bool}
+) -> {AP(~K, ~eq, pool, x) == True{} : Bool}:
+  match pool:
+    case P.Pool{+st, +r, +l}:
+      %Equal.sym(K, x, y, sound(x, y, hxy)) : {Acp(~K, ~eq, r, st, _) == True{} : Bool}
+      or_swap(Maybe.is_some(&2, P.Status, St(~K, ~eq, st, y)), P.member(~K, ~eq, r, y), hv)
+
+def head_mark(~K: Data, ~eq: K -> K -> Bool, +s: P.Status, pool: P.Pool<K>, +y: K, +x: K, hxy: {eq(x, y) == True{} : Bool}) ->
+  {AP(~K, ~eq, P.apply(K, P.PMark{s}, pool, y), x) == True{} : Bool}:
+  match pool:
+    case P.Pool{+st, +r, +l}:
+      or_true_r(P.member(~K, ~eq, r, x), Maybe.is_some(&2, P.Status, St(~K, ~eq, P.Entry{y, s} <> st, x)),
+        (%Equal.sym(Maybe<&2, P.Status>, St(~K, ~eq, P.Entry{y, s} <> st, x), Some{s}, st_hit(~K, ~eq, y, s, st, x, hxy)) :
+          {Maybe.is_some(&2, P.Status, _) == True{} : Bool} {==}))
+
+def head_start(~K: Data, ~eq: K -> K -> Bool, pool: P.Pool<K>, +y: K, +x: K, hxy: {eq(x, y) == True{} : Bool}) ->
+  {AP(~K, ~eq, P.apply(K, P.PStart{}, pool, y), x) == True{} : Bool}:
+  match pool:
+    case P.Pool{+st, +r, +l}:
+      or_true_l(P.member(~K, ~eq, y <> r, x), Maybe.is_some(&2, P.Status, St(~K, ~eq, st, x)), mem_hit(~K, ~eq, y, r, x, hxy))
+
+def IsSome(~K: Data, ~eq: K -> K -> Bool, +pool: P.Pool<K>, +x: K) -> Type:
+  {Maybe.is_some(&2, P.Status, St(~K, ~eq, Sts(K, pool), x)) == True{} : Bool}
+
+def tt.at0(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), a: P.Step, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  +pool: P.Pool<K>, +y: K, +t: List<&2, K>, +x: K, hv: VP(~K, ~eq, g, stale, limit, pool, y, a),
+  h: {Bool.or(P.member(~K, ~eq, y <> t, x), AP(~K, ~eq, pool, x)) == True{} : Bool}, hl: {P.le(1n, limit) == True{} : Bool},
+  hr: {Run(K, P.par.at(P.Pool<K>, a, u => pool, u => P.par(~K, ~eq, Nil{}, t, g, stale, limit, P.apply(K, a, pool, y)))) == Nil{} : List<&2, K>},
+  ih: @q: P.Pool<K> -> {Bool.or(P.member(~K, ~eq, t, x), AP(~K, ~eq, q, x)) == True{} : Bool} ->
+    {Run(K, PAR(~K, ~eq, Nil{}, t, g, stale, limit, q)) == Nil{} : List<&2, K>} -> IsSome(~K, ~eq, PAR(~K, ~eq, Nil{}, t, g, stale, limit, q), x)
+) -> IsSome(~K, ~eq, P.par.at(P.Pool<K>, a, u => pool, u => P.par(~K, ~eq, Nil{}, t, g, stale, limit, P.apply(K, a, pool, y))), x):
+  match a:
+    case P.PWait{}:
+      Empty.absurd(IsSome(~K, ~eq, pool, x), hv(hl, hr))
+    case P.PSkip{}:
+      ih(P.apply(K, P.PSkip{}, pool, y), tt.next(~K, ~eq, P.PSkip{}, pool, y, t, x, h, hxy => head_skip(~K, ~eq, ~sound, pool, y, x, hxy, hv)), hr)
+    case P.PMark{+s}:
+      ih(P.apply(K, P.PMark{s}, pool, y), tt.next(~K, ~eq, P.PMark{s}, pool, y, t, x, h, hxy => head_mark(~K, ~eq, s, pool, y, x, hxy)), hr)
+    case P.PStart{}:
+      ih(P.apply(K, P.PStart{}, pool, y), tt.next(~K, ~eq, P.PStart{}, pool, y, t, x, h, hxy => head_start(~K, ~eq, pool, y, x, hxy)), hr)
+
+def tt.at1(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), a: P.Step, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat,
+  +pool: P.Pool<K>, +e: P.Fin<K>, +r: List<&2, P.Fin<K>>, +y: K, +t: List<&2, K>, +x: K, hv: VP(~K, ~eq, g, stale, limit, pool, y, a),
+  h: {Bool.or(P.member(~K, ~eq, y <> t, x), AP(~K, ~eq, pool, x)) == True{} : Bool},
+  hr: {Run(K, P.par.at(P.Pool<K>, a,
+    u => P.par(~K, ~eq, r, y <> t, g, stale, limit, P.finish(~K, ~eq, pool, e)),
+    u => P.par(~K, ~eq, e <> r, t, g, stale, limit, P.apply(K, a, pool, y)))) == Nil{} : List<&2, K>},
+  ihw: {Bool.or(P.member(~K, ~eq, y <> t, x), AP(~K, ~eq, P.finish(~K, ~eq, pool, e), x)) == True{} : Bool} ->
+    {Run(K, PAR(~K, ~eq, r, y <> t, g, stale, limit, P.finish(~K, ~eq, pool, e))) == Nil{} : List<&2, K>} ->
+    IsSome(~K, ~eq, PAR(~K, ~eq, r, y <> t, g, stale, limit, P.finish(~K, ~eq, pool, e)), x),
+  ih: @q: P.Pool<K> -> {Bool.or(P.member(~K, ~eq, t, x), AP(~K, ~eq, q, x)) == True{} : Bool} ->
+    {Run(K, PAR(~K, ~eq, e <> r, t, g, stale, limit, q)) == Nil{} : List<&2, K>} -> IsSome(~K, ~eq, PAR(~K, ~eq, e <> r, t, g, stale, limit, q), x)
+) -> IsSome(~K, ~eq, P.par.at(P.Pool<K>, a,
+    u => P.par(~K, ~eq, r, y <> t, g, stale, limit, P.finish(~K, ~eq, pool, e)),
+    u => P.par(~K, ~eq, e <> r, t, g, stale, limit, P.apply(K, a, pool, y))), x):
+  match a:
+    case P.PWait{}:
+      ihw(or_mono(P.member(~K, ~eq, y <> t, x), AP(~K, ~eq, pool, x), AP(~K, ~eq, P.finish(~K, ~eq, pool, e), x), h,
+        f => acc_finish(~K, ~eq, ~sound, ~refl, pool, e, x, f)), hr)
+    case P.PSkip{}:
+      ih(P.apply(K, P.PSkip{}, pool, y), tt.next(~K, ~eq, P.PSkip{}, pool, y, t, x, h, hxy => head_skip(~K, ~eq, ~sound, pool, y, x, hxy, hv)), hr)
+    case P.PMark{+s}:
+      ih(P.apply(K, P.PMark{s}, pool, y), tt.next(~K, ~eq, P.PMark{s}, pool, y, t, x, h, hxy => head_mark(~K, ~eq, s, pool, y, x, hxy)), hr)
+    case P.PStart{}:
+      ih(P.apply(K, P.PStart{}, pool, y), tt.next(~K, ~eq, P.PStart{}, pool, y, t, x, h, hxy => head_start(~K, ~eq, pool, y, x, hxy)), hr)
+
+# A run that ends with nothing running has given a status to each node it accounted for.
+def par_tt(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), es: List<&2, P.Fin<K>>, p: List<&2, K>,
+  +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat, +pool: P.Pool<K>, +x: K,
+  h: {Bool.or(P.member(~K, ~eq, p, x), AP(~K, ~eq, pool, x)) == True{} : Bool}, +hl: {P.le(1n, limit) == True{} : Bool},
+  hr: {Run(K, PAR(~K, ~eq, es, p, g, stale, limit, pool)) == Nil{} : List<&2, K>}
+) -> IsSome(~K, ~eq, PAR(~K, ~eq, es, p, g, stale, limit, pool), x):
+  match es:
+    case Nil{}:
+      match p:
+        case Nil{}:
+          (%hr : {Bool.or(P.member(~K, ~eq, _, x), Maybe.is_some(&2, P.Status, St(~K, ~eq, Sts(K, pool), x))) == True{} : Bool} h)
+        case Con{+y, +t}:
+          tt.at0(~K, ~eq, ~sound, P.decide.par(~K, ~eq, g, stale, limit, pool, y), g, stale, limit, pool, y, t, x,
+            view.par(~K, ~eq, g, stale, limit, pool, y), h, hl, hr,
+            q => h1 => h2 => par_tt(~K, ~eq, ~sound, ~refl, Nil{}, t, g, stale, limit, q, x, h1, hl, h2))
+    case Con{+e, +r}:
+      match p:
+        case Nil{}:
+          par_tt(~K, ~eq, ~sound, ~refl, r, Nil{}, g, stale, limit, P.finish(~K, ~eq, pool, e), x, acc_finish(~K, ~eq, ~sound, ~refl, pool, e, x, h), hl, hr)
+        case Con{+y, +t}:
+          tt.at1(~K, ~eq, ~sound, ~refl, P.decide.par(~K, ~eq, g, stale, limit, pool, y), g, stale, limit, pool, e, r, y, t, x,
+            view.par(~K, ~eq, g, stale, limit, pool, y), h, hr,
+            h1 => h2 => par_tt(~K, ~eq, ~sound, ~refl, r, y <> t, g, stale, limit, P.finish(~K, ~eq, pool, e), x, h1, hl, h2),
+            q => h1 => h2 => par_tt(~K, ~eq, ~sound, ~refl, e <> r, t, g, stale, limit, q, x, h1, hl, h2))
+
+# Parallel execution: laws
+# ------------------------
+
+def P0(-K: Data) -> P.Pool<K>:
+  P.Pool{Nil{}, Nil{}, Nil{}}
+
+def gab.sel(~K: Data, ~eq: K -> K -> Bool, +stale: List<&2, K>, +limit: Nat, +pool: P.Pool<K>, +x: K, +ds: List<&2, K>, h: GAB(~K, ~eq, stale, limit, pool, x, ds)) ->
+  {P.selected.at(St(~K, ~eq, Sts(K, pool), x)) == True{} : Bool} -> {P.ready(~K, ~eq, ds, Sts(K, pool)) == True{} : Bool}:
+  (ga, gb) = h
+  (b1, q) = gb
+  b1
+
+def gab.run(~K: Data, ~eq: K -> K -> Bool, +stale: List<&2, K>, +limit: Nat, +pool: P.Pool<K>, +x: K, +ds: List<&2, K>, h: GAB(~K, ~eq, stale, limit, pool, x, ds)) ->
+  {Bool.or(Bool.not(P.member(~K, ~eq, Run(K, pool), x)), P.ready(~K, ~eq, ds, Sts(K, pool))) == True{} : Bool}:
+  (ga, gb) = h
+  (b1, q) = gb
+  (b2, b3) = q
+  b2
+
+def gab0(~K: Data, ~eq: K -> K -> Bool, +stale: List<&2, K>, +limit: Nat, +x: K, +ds: List<&2, K>) -> GAB(~K, ~eq, stale, limit, P0(K), x, ds):
+  ({==}, (hs => Empty.absurd({P.ready(~K, ~eq, ds, Nil{}) == True{} : Bool}, false_ne_true(hs)),
+    ({==}, hf => Empty.absurd({P.member(~K, ~eq, stale, x) == False{} : Bool}, none_ne_some(P.Status, P.Fresh{}, hf)))))
+
+def run_gab(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), es: List<&2, P.Fin<K>>, p: List<&2, K>,
+  +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat, +x: K, +ds: List<&2, K>, +hd: {P.deps(~K, ~eq, g, x) == Some{ds} : Maybe<&2, List<&2, K>>}
+) -> GAB(~K, ~eq, stale, limit, Laws.prun(~K, ~eq, es, p, g, stale, limit), x, ds):
+  par_gab(~K, ~eq, ~sound, ~refl, es, p, g, stale, limit, P0(K), x, ds, hd, gab0(~K, ~eq, stale, limit, x, ds))
+
+def run_ga(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), es: List<&2, P.Fin<K>>, p: List<&2, K>,
+  +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat
+) -> GA(~K, ~eq, limit, Laws.prun(~K, ~eq, es, p, g, stale, limit)):
+  par_ga(~K, ~eq, ~sound, ~refl, es, p, g, stale, limit, P0(K), {==})
+
+def Laws.par_ready(K, eq, sound, refl, es, p, g, stale, limit, x, ds, hx, hd):
+  +es = es
+  +p = p
+  +g = g
+  +stale = stale
+  +limit = limit
+  +x = x
+  +ds = ds
+  gab.sel(~K, ~eq, stale, limit, Laws.prun(~K, ~eq, es, p, g, stale, limit), x, ds, run_gab(~K, ~eq, ~sound, ~refl, es, p, g, stale, limit, x, ds, hd))(hx)
+
+def Laws.par_running(K, eq, sound, refl, es, p, g, stale, limit, x, ds, hx, hd):
+  +es = es
+  +p = p
+  +g = g
+  +stale = stale
+  +limit = limit
+  +x = x
+  +ds = ds
+  +f = Laws.prun(~K, ~eq, es, p, g, stale, limit)
+  imp_true(P.member(~K, ~eq, Run(K, f), x), P.ready(~K, ~eq, ds, Sts(K, f)), hx,
+    gab.run(~K, ~eq, stale, limit, f, x, ds, run_gab(~K, ~eq, ~sound, ~refl, es, p, g, stale, limit, x, ds, hd)))
+
+def par_blocked.if(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), b: Bool, +es: List<&2, P.Fin<K>>, +p: List<&2, K>,
+  +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat, +x: K, +ds: List<&2, K>, +d: K,
+  hb: {P.ok.at(St(~K, ~eq, Sts(K, Laws.prun(~K, ~eq, es, p, g, stale, limit)), x)) == b : Bool},
+  hd: {P.deps(~K, ~eq, g, x) == Some{ds} : Maybe<&2, List<&2, K>>}, hm: {P.member(~K, ~eq, ds, d) == True{} : Bool},
+  hf: {P.ok.at(St(~K, ~eq, Sts(K, Laws.prun(~K, ~eq, es, p, g, stale, limit)), d)) == False{} : Bool}
+) -> {b == False{} : Bool}:
+  match b:
+    case True{}:
+      +f = Sts(K, Laws.prun(~K, ~eq, es, p, g, stale, limit))
+      Empty.absurd({True{} == False{} : Bool},
+        clash(P.ok.at(St(~K, ~eq, f, d)),
+          ready_mem(~K, ~eq, ~sound, ds, f, d,
+            Laws.par_ready(~K, ~eq, ~sound, ~refl, es, p, g, stale, limit, x, ds, ok_sel(St(~K, ~eq, f, x), hb), hd), hm),
+          hf))
+    case False{}:
+      {==}
+
+def Laws.par_blocked(K, eq, sound, refl, es, p, g, stale, limit, x, ds, d, hd, hm, hf):
+  +es = es
+  +p = p
+  +g = g
+  +stale = stale
+  +limit = limit
+  +x = x
+  par_blocked.if(~K, ~eq, ~sound, ~refl, P.ok.at(St(~K, ~eq, Sts(K, Laws.prun(~K, ~eq, es, p, g, stale, limit)), x)), es, p, g, stale, limit, x, ds, d,
+    {==}, hd, hm, hf)
+
+def Laws.par_once(K, eq, sound, refl, es, p, g, stale, limit):
+  +es = es
+  +p = p
+  +g = g
+  +stale = stale
+  +limit = limit
+  +f = Laws.prun(~K, ~eq, es, p, g, stale, limit)
+  ga3(~K, ~eq, limit, Sts(K, f), Run(K, f), Log(K, f), run_ga(~K, ~eq, ~sound, ~refl, es, p, g, stale, limit))
+
+def Laws.par_once_status(K, eq, sound, refl, es, p, g, stale, limit):
+  +es = es
+  +p = p
+  +g = g
+  +stale = stale
+  +limit = limit
+  +f = Laws.prun(~K, ~eq, es, p, g, stale, limit)
+  ga2(~K, ~eq, limit, Sts(K, f), Run(K, f), Log(K, f), run_ga(~K, ~eq, ~sound, ~refl, es, p, g, stale, limit))
+
+def Laws.par_limit(K, eq, sound, refl, es, p, g, stale, limit):
+  +es = es
+  +p = p
+  +g = g
+  +stale = stale
+  +limit = limit
+  +f = Laws.prun(~K, ~eq, es, p, g, stale, limit)
+  ga5(~K, ~eq, limit, Sts(K, f), Run(K, f), Log(K, f), run_ga(~K, ~eq, ~sound, ~refl, es, p, g, stale, limit))
+
+def Laws.par_fresh(K, eq, sound, refl, es, p, g, stale, limit, x, hx):
+  +x = x
+  +stale = stale
+  par_gf(~K, ~eq, ~sound, es, p, g, stale, limit, P0(K), x,
+    hf => Empty.absurd({P.member(~K, ~eq, stale, x) == False{} : Bool}, none_ne_some(P.Status, P.Fresh{}, hf)))(hx)
+
+def Laws.par_total(K, eq, sound, refl, es, p, g, stale, limit, x, hl, hr, hx):
+  +p = p
+  +x = x
+  par_tt(~K, ~eq, ~sound, ~refl, es, p, g, stale, limit, P0(K), x,
+    or_true_l(P.member(~K, ~eq, p, x), AP(~K, ~eq, P0(K), x), hx), hl, hr)
+
 # Fixtures
 # --------
+
+def Laws.fixture_par():
+  {==}
 
 def Laws.fixture_plan():
   {==}

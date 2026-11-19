@@ -366,6 +366,161 @@ law exec_fresh:
   for hx: {P.status(~K, ~eq, run(~K, ~eq, p, g, stale, rs), x) == Some{P.Fresh{}} : Maybe<&2, P.Status>}
   {P.member(~K, ~eq, stale, x) == False{} : Bool}
 
+# Parallel execution
+# ------------------
+# These hold for every node list p, stale set, limit, and order of finishes es.
+# They take eq as sound and reflexive.
+
+def prun(~K: Data, ~eq: K -> K -> Bool, es: List<&2, P.Fin<K>>, p: List<&2, K>, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +limit: Nat) -> P.Pool<K>:
+  P.par(~K, ~eq, es, p, g, stale, limit, P.Pool{Nil{}, Nil{}, Nil{}})
+
+def statuses(-K: Data, pool: P.Pool<K>) -> List<&2, P.Entry<K>>:
+  match pool:
+    case P.Pool{st, r, l}:
+      st
+
+def running(-K: Data, pool: P.Pool<K>) -> List<&2, K>:
+  match pool:
+    case P.Pool{st, r, l}:
+      r
+
+def started(-K: Data, pool: P.Pool<K>) -> List<&2, K>:
+  match pool:
+    case P.Pool{st, r, l}:
+      l
+
+# A node that ran or was reused had every prerequisite Built or Fresh,
+law par_ready:
+  for ~K: Data
+  for ~eq: K -> K -> Bool
+  for ~sound: @x: K -> @y: K -> {eq(x, y) == True{} : Bool} -> {x == y : K}
+  for ~refl: @x: K -> {eq(x, x) == True{} : Bool}
+  for es: List<&2, P.Fin<K>>
+  for p: List<&2, K>
+  for g: List<&2, P.Node<K>>
+  for stale: List<&2, K>
+  for limit: Nat
+  for x: K
+  for ds: List<&2, K>
+  for hx: {P.selected.at(P.status(~K, ~eq, statuses(K, prun(~K, ~eq, es, p, g, stale, limit)), x)) == True{} : Bool}
+  for hd: {P.deps(~K, ~eq, g, x) == Some{ds} : Maybe<&2, List<&2, K>>}
+  {P.ready(~K, ~eq, ds, statuses(K, prun(~K, ~eq, es, p, g, stale, limit))) == True{} : Bool}
+
+# and so does a node whose command runs now.
+law par_running:
+  for ~K: Data
+  for ~eq: K -> K -> Bool
+  for ~sound: @x: K -> @y: K -> {eq(x, y) == True{} : Bool} -> {x == y : K}
+  for ~refl: @x: K -> {eq(x, x) == True{} : Bool}
+  for es: List<&2, P.Fin<K>>
+  for p: List<&2, K>
+  for g: List<&2, P.Node<K>>
+  for stale: List<&2, K>
+  for limit: Nat
+  for x: K
+  for ds: List<&2, K>
+  for hx: {P.member(~K, ~eq, running(K, prun(~K, ~eq, es, p, g, stale, limit)), x) == True{} : Bool}
+  for hd: {P.deps(~K, ~eq, g, x) == Some{ds} : Maybe<&2, List<&2, K>>}
+  {P.ready(~K, ~eq, ds, statuses(K, prun(~K, ~eq, es, p, g, stale, limit))) == True{} : Bool}
+
+# A prerequisite that did not succeed keeps its dependents from success.
+law par_blocked:
+  for ~K: Data
+  for ~eq: K -> K -> Bool
+  for ~sound: @x: K -> @y: K -> {eq(x, y) == True{} : Bool} -> {x == y : K}
+  for ~refl: @x: K -> {eq(x, x) == True{} : Bool}
+  for es: List<&2, P.Fin<K>>
+  for p: List<&2, K>
+  for g: List<&2, P.Node<K>>
+  for stale: List<&2, K>
+  for limit: Nat
+  for x: K
+  for ds: List<&2, K>
+  for d: K
+  for hd: {P.deps(~K, ~eq, g, x) == Some{ds} : Maybe<&2, List<&2, K>>}
+  for hm: {P.member(~K, ~eq, ds, d) == True{} : Bool}
+  for hf: {P.ok.at(P.status(~K, ~eq, statuses(K, prun(~K, ~eq, es, p, g, stale, limit)), d)) == False{} : Bool}
+  {P.ok.at(P.status(~K, ~eq, statuses(K, prun(~K, ~eq, es, p, g, stale, limit)), x)) == False{} : Bool}
+
+# Each command starts at most once,
+law par_once:
+  for ~K: Data
+  for ~eq: K -> K -> Bool
+  for ~sound: @x: K -> @y: K -> {eq(x, y) == True{} : Bool} -> {x == y : K}
+  for ~refl: @x: K -> {eq(x, x) == True{} : Bool}
+  for es: List<&2, P.Fin<K>>
+  for p: List<&2, K>
+  for g: List<&2, P.Node<K>>
+  for stale: List<&2, K>
+  for limit: Nat
+  {P.distinct(~K, ~eq, started(K, prun(~K, ~eq, es, p, g, stale, limit))) == True{} : Bool}
+
+# and each node gets at most one status.
+law par_once_status:
+  for ~K: Data
+  for ~eq: K -> K -> Bool
+  for ~sound: @x: K -> @y: K -> {eq(x, y) == True{} : Bool} -> {x == y : K}
+  for ~refl: @x: K -> {eq(x, x) == True{} : Bool}
+  for es: List<&2, P.Fin<K>>
+  for p: List<&2, K>
+  for g: List<&2, P.Node<K>>
+  for stale: List<&2, K>
+  for limit: Nat
+  {P.distinct(~K, ~eq, P.keys(K, statuses(K, prun(~K, ~eq, es, p, g, stale, limit)))) == True{} : Bool}
+
+# A stale node is never reused.
+law par_fresh:
+  for ~K: Data
+  for ~eq: K -> K -> Bool
+  for ~sound: @x: K -> @y: K -> {eq(x, y) == True{} : Bool} -> {x == y : K}
+  for ~refl: @x: K -> {eq(x, x) == True{} : Bool}
+  for es: List<&2, P.Fin<K>>
+  for p: List<&2, K>
+  for g: List<&2, P.Node<K>>
+  for stale: List<&2, K>
+  for limit: Nat
+  for x: K
+  for hx: {P.status(~K, ~eq, statuses(K, prun(~K, ~eq, es, p, g, stale, limit)), x) == Some{P.Fresh{}} : Maybe<&2, P.Status>}
+  {P.member(~K, ~eq, stale, x) == False{} : Bool}
+
+# No more than limit commands run at once.
+law par_limit:
+  for ~K: Data
+  for ~eq: K -> K -> Bool
+  for ~sound: @x: K -> @y: K -> {eq(x, y) == True{} : Bool} -> {x == y : K}
+  for ~refl: @x: K -> {eq(x, x) == True{} : Bool}
+  for es: List<&2, P.Fin<K>>
+  for p: List<&2, K>
+  for g: List<&2, P.Node<K>>
+  for stale: List<&2, K>
+  for limit: Nat
+  {P.le(List.length(&2, K, running(K, prun(~K, ~eq, es, p, g, stale, limit))), limit) == True{} : Bool}
+
+# With room for one command, a run that ends with nothing running gives every node of p a status.
+law par_total:
+  for ~K: Data
+  for ~eq: K -> K -> Bool
+  for ~sound: @x: K -> @y: K -> {eq(x, y) == True{} : Bool} -> {x == y : K}
+  for ~refl: @x: K -> {eq(x, x) == True{} : Bool}
+  for es: List<&2, P.Fin<K>>
+  for p: List<&2, K>
+  for g: List<&2, P.Node<K>>
+  for stale: List<&2, K>
+  for limit: Nat
+  for x: K
+  for hl: {P.le(1n, limit) == True{} : Bool}
+  for hr: {running(K, prun(~K, ~eq, es, p, g, stale, limit)) == Nil{} : List<&2, K>}
+  for hx: {P.member(~K, ~eq, p, x) == True{} : Bool}
+  {Maybe.is_some(&2, P.Status, P.status(~K, ~eq, statuses(K, prun(~K, ~eq, es, p, g, stale, limit)), x)) == True{} : Bool}
+
+# The diamond with room for two: base runs alone, lib and gen run together, then app.
+law fixture_par:
+  {prun(~String, ~String.eq, [P.Fin{"base", True{}}, P.Fin{"gen", True{}}, P.Fin{"lib", True{}}, P.Fin{"app", True{}}],
+     ["base", "lib", "gen", "app"], [P.Node{"app", ["lib", "gen"]}, P.Node{"lib", ["base"]}, P.Node{"gen", ["base"]}, P.Node{"base", []}],
+     ["base", "lib", "gen", "app"], 2n)
+   == P.Pool{[P.Entry{"app", P.Built{}}, P.Entry{"lib", P.Built{}}, P.Entry{"gen", P.Built{}}, P.Entry{"base", P.Built{}}], Nil{}, ["app", "gen", "lib", "base"]}
+   : P.Pool<String>}
+
 # Fixtures
 # --------
 # A diamond: app requires lib and gen, and both require base.
