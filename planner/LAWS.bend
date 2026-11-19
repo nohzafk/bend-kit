@@ -1,5 +1,6 @@
 import Base
 import ./planner.bend as P
+import bend-kit-collections@0.1.5.0/LAWS.bend as Col
 
 # Every member of s has all its prerequisites in s.
 def closed(~K: Data, ~eq: K -> K -> Bool, xs: List<&2, K>, +g: List<&2, P.Node<K>>, +s: List<&2, K>) -> Bool:
@@ -242,6 +243,39 @@ law plan_complete:
   for ts: List<&2, K>
   for h: {P.plan(~K, ~eq, g, ts) == Fail{P.Refused{}} : Result<&2, &2, P.Error<K>, List<&2, K>>}
   Empty
+
+# Indexes
+# -------
+# plan.fast and invalidate.fast answer exactly as plan and invalidate when cmp is a
+# total order whose EQ means equal keys, and eq agrees with it. So every law above
+# holds for them too.
+
+law plan_index:
+  for ~K: Data
+  for ~eq: K -> K -> Bool
+  for ~cmp: K -> K -> Cmp
+  for ~crefl: @x: K -> {cmp(x, x) == EQ{} : Cmp}
+  for ~ceq: @x: K -> @y: K -> {cmp(x, y) == EQ{} : Cmp} -> {x == y : K}
+  for ~cflip: @x: K -> @y: K -> {cmp(y, x) == Col.flip(cmp(x, y)) : Cmp}
+  for ~ctrans: @x: K -> @y: K -> @z: K -> {cmp(x, y) == LT{} : Cmp} -> {cmp(y, z) == LT{} : Cmp} -> {cmp(x, z) == LT{} : Cmp}
+  for ~agree: @x: K -> @y: K -> {eq(x, y) == Cmp.is_eq(cmp(x, y)) : Bool}
+  for g: List<&2, P.Node<K>>
+  for ts: List<&2, K>
+  {P.plan.fast(~K, ~eq, ~cmp, g, ts) == P.plan(~K, ~eq, g, ts) : Result<&2, &2, P.Error<K>, List<&2, K>>}
+
+law stale_index:
+  for ~K: Data
+  for ~eq: K -> K -> Bool
+  for ~cmp: K -> K -> Cmp
+  for ~crefl: @x: K -> {cmp(x, x) == EQ{} : Cmp}
+  for ~ceq: @x: K -> @y: K -> {cmp(x, y) == EQ{} : Cmp} -> {x == y : K}
+  for ~cflip: @x: K -> @y: K -> {cmp(y, x) == Col.flip(cmp(x, y)) : Cmp}
+  for ~ctrans: @x: K -> @y: K -> @z: K -> {cmp(x, y) == LT{} : Cmp} -> {cmp(y, z) == LT{} : Cmp} -> {cmp(x, z) == LT{} : Cmp}
+  for ~agree: @x: K -> @y: K -> {eq(x, y) == Cmp.is_eq(cmp(x, y)) : Bool}
+  for p: List<&2, K>
+  for g: List<&2, P.Node<K>>
+  for changed: List<&2, K>
+  {P.invalidate.fast(~K, ~cmp, p, g, changed) == P.invalidate(~K, ~eq, p, g, changed) : List<&2, K>}
 
 # Invalidation
 # ------------

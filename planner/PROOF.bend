@@ -1,6 +1,9 @@
 import Base
 import ./planner.bend as P
 import ./LAWS.bend as Laws
+import bend-kit-collections@0.1.5.0/omap.bend as OMap
+import bend-kit-collections@0.1.5.0/LAWS.bend as Col
+import bend-kit-collections@0.1.5.0/PROOF.bend as ColProof
 
 # Bool
 # ----
@@ -3699,6 +3702,354 @@ def Laws.par_total(K, eq, sound, refl, es, p, g, stale, limit, x, hl, hr, hx):
   +x = x
   par_tt(~K, ~eq, ~sound, ~refl, es, p, g, stale, limit, P0(K), x,
     or_true_l(P.member(~K, ~eq, p, x), AP(~K, ~eq, P0(K), x), hx), hl, hr)
+
+# Indexes
+# -------
+
+def CRefl(~K: Data, ~cmp: K -> K -> Cmp) -> Type:
+  @x: K -> {cmp(x, x) == EQ{} : Cmp}
+
+def CEq(~K: Data, ~cmp: K -> K -> Cmp) -> Type:
+  @x: K -> @y: K -> {cmp(x, y) == EQ{} : Cmp} -> {x == y : K}
+
+def CFlip(~K: Data, ~cmp: K -> K -> Cmp) -> Type:
+  @x: K -> @y: K -> {cmp(y, x) == Col.flip(cmp(x, y)) : Cmp}
+
+def CTrans(~K: Data, ~cmp: K -> K -> Cmp) -> Type:
+  @x: K -> @y: K -> @z: K -> {cmp(x, y) == LT{} : Cmp} -> {cmp(y, z) == LT{} : Cmp} -> {cmp(x, z) == LT{} : Cmp}
+
+def Agree(~K: Data, ~cmp: K -> K -> Cmp, ~eq: K -> K -> Bool) -> Type:
+  @x: K -> @y: K -> {eq(x, y) == Cmp.is_eq(cmp(x, y)) : Bool}
+
+def is_eq_true(c: Cmp, h: {Cmp.is_eq(c) == True{} : Bool}) -> {c == EQ{} : Cmp}:
+  match c:
+    case LT{}:
+      Empty.absurd({LT{} == EQ{} : Cmp}, false_ne_true(h))
+    case EQ{}:
+      {==}
+    case GT{}:
+      Empty.absurd({GT{} == EQ{} : Cmp}, false_ne_true(h))
+
+def sound_of(~K: Data, ~cmp: K -> K -> Cmp, ~eq: K -> K -> Bool, ~ceq: CEq(~K, ~cmp), ~agree: Agree(~K, ~cmp, ~eq), +x: K, +y: K,
+  h: {eq(x, y) == True{} : Bool}
+) -> {x == y : K}:
+  ceq(x, y, is_eq_true(cmp(x, y), Equal.trans(Bool, Cmp.is_eq(cmp(x, y)), eq(x, y), True{}, Equal.sym(Bool, eq(x, y), Cmp.is_eq(cmp(x, y)), agree(x, y)), h)))
+
+def refl_of(~K: Data, ~cmp: K -> K -> Cmp, ~eq: K -> K -> Bool, ~crefl: CRefl(~K, ~cmp), ~agree: Agree(~K, ~cmp, ~eq), +x: K) ->
+  {eq(x, x) == True{} : Bool}:
+  %Equal.sym(Bool, eq(x, x), Cmp.is_eq(cmp(x, x)), agree(x, x)) : {_ == True{} : Bool}
+  %Equal.sym(Cmp, cmp(x, x), EQ{}, crefl(x)) : {Cmp.is_eq(_) == True{} : Bool}
+  {==}
+
+# eq(k, x) is false, so cmp(x, k) is not EQ.
+def ne_of_false(~K: Data, ~cmp: K -> K -> Cmp, ~eq: K -> K -> Bool, ~crefl: CRefl(~K, ~cmp), ~ceq: CEq(~K, ~cmp), ~agree: Agree(~K, ~cmp, ~eq), +k: K, +x: K,
+  h: {eq(k, x) == False{} : Bool}
+) -> {cmp(x, k) == EQ{} : Cmp} -> Empty:
+  e => clash(eq(k, x), (%Equal.sym(K, x, k, ceq(x, k, e)) : {eq(k, _) == True{} : Bool} refl_of(~K, ~cmp, ~eq, ~crefl, ~agree, k)), h)
+
+def ST(~K: Data, ~V: Data, ~cmp: K -> K -> Cmp, m: OMap.OMap<K, V>) -> Bool:
+  Col.searchtree(~K, ~V, ~cmp, m)
+
+def idx_tree(~K: Data, ~cmp: K -> K -> Cmp, ~crefl: CRefl(~K, ~cmp), ~ceq: CEq(~K, ~cmp), ~cflip: CFlip(~K, ~cmp), ~ctrans: CTrans(~K, ~cmp),
+  xs: List<&2, K>
+) -> {ST(~K, ~Unit, ~cmp, P.idx(~K, ~cmp, xs)) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      Col.omap_new_searchtree(~K, ~Unit, ~cmp)
+    case Con{+x, +t}:
+      Col.omap_put_searchtree(~K, ~Unit, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, P.idx(~K, ~cmp, t),
+        idx_tree(~K, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, t), x, Unit{})
+
+def gidx_tree(~K: Data, ~cmp: K -> K -> Cmp, ~crefl: CRefl(~K, ~cmp), ~ceq: CEq(~K, ~cmp), ~cflip: CFlip(~K, ~cmp), ~ctrans: CTrans(~K, ~cmp),
+  g: List<&2, P.Node<K>>
+) -> {ST(~K, ~List<&2, K>, ~cmp, P.gidx(~K, ~cmp, g)) == True{} : Bool}:
+  match g:
+    case Nil{}:
+      Col.omap_new_searchtree(~K, ~List<&2, K>, ~cmp)
+    case Con{P.Node{+id, +ds}, +t}:
+      Col.omap_put_searchtree(~K, ~List<&2, K>, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, P.gidx(~K, ~cmp, t),
+        gidx_tree(~K, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, t), id, ds)
+
+def IHas(~K: Data, ~cmp: K -> K -> Cmp, +s: OMap.OSet(K), +k: K) -> Bool:
+  OMap.OSet.has(~K, ~cmp, s, k)
+
+def ihas.if(
+  ~K: Data, ~cmp: K -> K -> Cmp, ~eq: K -> K -> Bool, ~crefl: CRefl(~K, ~cmp), ~ceq: CEq(~K, ~cmp), ~cflip: CFlip(~K, ~cmp), ~ctrans: CTrans(~K, ~cmp),
+  ~agree: Agree(~K, ~cmp, ~eq), c: Bool, +x: K, +t: List<&2, K>, +k: K,
+  +hc: {eq(k, x) == c : Bool}, ih: {IHas(~K, ~cmp, P.idx(~K, ~cmp, t), k) == P.member(~K, ~eq, t, k) : Bool}
+) -> {IHas(~K, ~cmp, P.idx(~K, ~cmp, x <> t), k) == P.member(~K, ~eq, x <> t, k) : Bool}:
+  match c:
+    case True{}:
+      +m = P.idx(~K, ~cmp, t)
+      +tree = idx_tree(~K, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, t)
+      %Equal.sym(Bool, P.member(~K, ~eq, x <> t, k), True{}, mem_hit(~K, ~eq, x, t, k, hc)) : {IHas(~K, ~cmp, P.idx(~K, ~cmp, x <> t), k) == _ : Bool}
+      %Equal.sym(K, k, x, sound_of(~K, ~cmp, ~eq, ~ceq, ~agree, k, x, hc)) : {IHas(~K, ~cmp, P.idx(~K, ~cmp, x <> t), _) == True{} : Bool}
+      %Equal.sym(Maybe<&2, Unit>, OMap.OMap.get(~K, ~Unit, ~cmp, OMap.OMap.put(~K, ~Unit, ~cmp, m, x, Unit{}), x), Some{Unit{}},
+        Col.omap_get_put_same(~K, ~Unit, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, m, tree, x, Unit{})) : {Maybe.is_some(&2, Unit, _) == True{} : Bool}
+      {==}
+    case False{}:
+      +m = P.idx(~K, ~cmp, t)
+      +tree = idx_tree(~K, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, t)
+      %Equal.sym(Bool, P.member(~K, ~eq, x <> t, k), P.member(~K, ~eq, t, k), mem_miss(~K, ~eq, x, t, k, hc)) : {IHas(~K, ~cmp, P.idx(~K, ~cmp, x <> t), k) == _ : Bool}
+      %Equal.sym(Maybe<&2, Unit>, OMap.OMap.get(~K, ~Unit, ~cmp, OMap.OMap.put(~K, ~Unit, ~cmp, m, x, Unit{}), k), OMap.OMap.get(~K, ~Unit, ~cmp, m, k),
+        Col.omap_get_put_other_key(~K, ~Unit, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, m, tree, x, k,
+          ne_of_false(~K, ~cmp, ~eq, ~crefl, ~ceq, ~agree, k, x, hc), Unit{})) : {Maybe.is_some(&2, Unit, _) == P.member(~K, ~eq, t, k) : Bool}
+      ih
+
+# The index of xs has exactly the members of xs.
+def ihas(
+  ~K: Data, ~cmp: K -> K -> Cmp, ~eq: K -> K -> Bool, ~crefl: CRefl(~K, ~cmp), ~ceq: CEq(~K, ~cmp), ~cflip: CFlip(~K, ~cmp), ~ctrans: CTrans(~K, ~cmp),
+  ~agree: Agree(~K, ~cmp, ~eq), xs: List<&2, K>, +k: K
+) -> {IHas(~K, ~cmp, P.idx(~K, ~cmp, xs), k) == P.member(~K, ~eq, xs, k) : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      ihas.if(~K, ~cmp, ~eq, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, eq(k, x), x, t, k, {==},
+        ihas(~K, ~cmp, ~eq, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, t, k))
+
+def GGet(~K: Data, ~cmp: K -> K -> Cmp, +gi: OMap.OMap<K, List<&2, K>>, +k: K) -> Maybe<&2, List<&2, K>>:
+  OMap.OMap.get(~K, ~List<&2, K>, ~cmp, gi, k)
+
+def gget.if(
+  ~K: Data, ~cmp: K -> K -> Cmp, ~eq: K -> K -> Bool, ~crefl: CRefl(~K, ~cmp), ~ceq: CEq(~K, ~cmp), ~cflip: CFlip(~K, ~cmp), ~ctrans: CTrans(~K, ~cmp),
+  ~agree: Agree(~K, ~cmp, ~eq), c: Bool, +id: K, +ds: List<&2, K>, +t: List<&2, P.Node<K>>, +k: K,
+  +hc: {eq(k, id) == c : Bool}, ih: {GGet(~K, ~cmp, P.gidx(~K, ~cmp, t), k) == P.deps(~K, ~eq, t, k) : Maybe<&2, List<&2, K>>}
+) -> {GGet(~K, ~cmp, P.gidx(~K, ~cmp, P.Node{id, ds} <> t), k) == P.deps(~K, ~eq, P.Node{id, ds} <> t, k) : Maybe<&2, List<&2, K>>}:
+  match c:
+    case True{}:
+      +m = P.gidx(~K, ~cmp, t)
+      +tree = gidx_tree(~K, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, t)
+      %Equal.sym(Maybe<&2, List<&2, K>>, P.deps(~K, ~eq, P.Node{id, ds} <> t, k), Some{ds}, deps_hit(~K, ~eq, id, ds, t, k, hc)) :
+        {GGet(~K, ~cmp, P.gidx(~K, ~cmp, P.Node{id, ds} <> t), k) == _ : Maybe<&2, List<&2, K>>}
+      %Equal.sym(K, k, id, sound_of(~K, ~cmp, ~eq, ~ceq, ~agree, k, id, hc)) : {GGet(~K, ~cmp, P.gidx(~K, ~cmp, P.Node{id, ds} <> t), _) == Some{ds} : Maybe<&2, List<&2, K>>}
+      Col.omap_get_put_same(~K, ~List<&2, K>, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, m, tree, id, ds)
+    case False{}:
+      +m = P.gidx(~K, ~cmp, t)
+      +tree = gidx_tree(~K, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, t)
+      %Equal.sym(Maybe<&2, List<&2, K>>, P.deps(~K, ~eq, P.Node{id, ds} <> t, k), P.deps(~K, ~eq, t, k), deps_miss(~K, ~eq, id, ds, t, k, hc)) :
+        {GGet(~K, ~cmp, P.gidx(~K, ~cmp, P.Node{id, ds} <> t), k) == _ : Maybe<&2, List<&2, K>>}
+      %Equal.sym(Maybe<&2, List<&2, K>>, GGet(~K, ~cmp, OMap.OMap.put(~K, ~List<&2, K>, ~cmp, m, id, ds), k), GGet(~K, ~cmp, m, k),
+        Col.omap_get_put_other_key(~K, ~List<&2, K>, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, m, tree, id, k,
+          ne_of_false(~K, ~cmp, ~eq, ~crefl, ~ceq, ~agree, k, id, hc), ds)) : {_ == P.deps(~K, ~eq, t, k) : Maybe<&2, List<&2, K>>}
+      ih
+
+# The graph index finds the prerequisites that deps finds.
+def gget(
+  ~K: Data, ~cmp: K -> K -> Cmp, ~eq: K -> K -> Bool, ~crefl: CRefl(~K, ~cmp), ~ceq: CEq(~K, ~cmp), ~cflip: CFlip(~K, ~cmp), ~ctrans: CTrans(~K, ~cmp),
+  ~agree: Agree(~K, ~cmp, ~eq), g: List<&2, P.Node<K>>, +k: K
+) -> {GGet(~K, ~cmp, P.gidx(~K, ~cmp, g), k) == P.deps(~K, ~eq, g, k) : Maybe<&2, List<&2, K>>}:
+  match g:
+    case Nil{}:
+      {==}
+    case Con{P.Node{+id, +ds}, +t}:
+      gget.if(~K, ~cmp, ~eq, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, eq(k, id), id, ds, t, k, {==},
+        gget(~K, ~cmp, ~eq, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, t, k))
+
+# Indexes: the walk
+# -----------------
+
+def RW(-K: Data) -> Type:
+  Result<&2, &2, P.Error<K>, P.Walk<K>>
+
+def walked(~K: Data, ~cmp: K -> K -> Cmp, r: Result<&2, &2, P.Error<K>, List<&2, K>>) -> Result<&2, &2, P.Error<K>, P.Walk<K>>:
+  match r:
+    case Fail{e}:
+      Fail{e}
+    case Done{+x}:
+      Done{P.Walk{x, P.idx(~K, ~cmp, x)}}
+
+def at_eq(
+  ~K: Data, ~cmp: K -> K -> Cmp, b1: Bool, b2: Bool, m: Maybe<&2, List<&2, K>>,
+  skipL: Unit -> Result<&2, &2, P.Error<K>, P.Walk<K>>, skipR: Unit -> Result<&2, &2, P.Error<K>, List<&2, K>>,
+  loopL: Unit -> Result<&2, &2, P.Error<K>, P.Walk<K>>, loopR: Unit -> Result<&2, &2, P.Error<K>, List<&2, K>>,
+  missL: Unit -> Result<&2, &2, P.Error<K>, P.Walk<K>>, missR: Unit -> Result<&2, &2, P.Error<K>, List<&2, K>>,
+  childL: List<&2, K> -> Result<&2, &2, P.Error<K>, P.Walk<K>>, childR: List<&2, K> -> Result<&2, &2, P.Error<K>, List<&2, K>>,
+  es: {skipL(Unit{}) == walked(~K, ~cmp, skipR(Unit{})) : Result<&2, &2, P.Error<K>, P.Walk<K>>},
+  el: {loopL(Unit{}) == walked(~K, ~cmp, loopR(Unit{})) : Result<&2, &2, P.Error<K>, P.Walk<K>>},
+  em: {missL(Unit{}) == walked(~K, ~cmp, missR(Unit{})) : Result<&2, &2, P.Error<K>, P.Walk<K>>},
+  ec: @dd: List<&2, K> -> {childL(dd) == walked(~K, ~cmp, childR(dd)) : Result<&2, &2, P.Error<K>, P.Walk<K>>}
+) -> {P.fast.at(K, Result<&2, &2, P.Error<K>, P.Walk<K>>, b1, b2, m, skipL, loopL, missL, childL)
+      == walked(~K, ~cmp, P.go.at(K, Result<&2, &2, P.Error<K>, List<&2, K>>, b1, u => b2, u => m, skipR, loopR, missR, childR))
+      : Result<&2, &2, P.Error<K>, P.Walk<K>>}:
+  match b1:
+    case True{}:
+      es
+    case False{}:
+      match b2:
+        case True{}:
+          el
+        case False{}:
+          match m:
+            case None{}:
+              em
+            case Some{dd}:
+              ec(dd)
+
+def then_eq(
+  ~K: Data, ~cmp: K -> K -> Cmp, r: Result<&2, &2, P.Error<K>, List<&2, K>>,
+  kL: List<&2, K> -> OMap.OSet(K) -> Result<&2, &2, P.Error<K>, P.Walk<K>>, kR: List<&2, K> -> Result<&2, &2, P.Error<K>, List<&2, K>>,
+  hk: @x: List<&2, K> -> {kL(x)(P.idx(~K, ~cmp, x)) == walked(~K, ~cmp, kR(x)) : Result<&2, &2, P.Error<K>, P.Walk<K>>}
+) -> {P.fast.then(K, walked(~K, ~cmp, r), kL) == walked(~K, ~cmp, P.go.then(K, r, kR)) : Result<&2, &2, P.Error<K>, P.Walk<K>>}:
+  match r:
+    case Fail{e}:
+      {==}
+    case Done{x}:
+      hk(x)
+
+def FGO(~K: Data, ~eq: K -> K -> Bool, ~cmp: K -> K -> Cmp, fuel: Nat, ds: List<&2, K>, +g: List<&2, P.Node<K>>, +path: List<&2, K>, +done: List<&2, K>) -> Result<&2, &2, P.Error<K>, P.Walk<K>>:
+  P.go.fast(~K, ~eq, ~cmp, fuel, ds, P.gidx(~K, ~cmp, g), path, P.idx(~K, ~cmp, path), done, P.idx(~K, ~cmp, done))
+
+def out_eq(~K: Data, ~cmp: K -> K -> Cmp, ds: List<&2, K>, +done: List<&2, K>) ->
+  {P.fast.out(K, ds, done, P.idx(~K, ~cmp, done)) == walked(~K, ~cmp, P.go.out(K, ds, done)) : Result<&2, &2, P.Error<K>, P.Walk<K>>}:
+  match ds:
+    case Nil{}:
+      {==}
+    case Con{d, t}:
+      {==}
+
+# The indexed walk answers as the list walk.
+def go_fast_eq(
+  ~K: Data, ~eq: K -> K -> Bool, ~cmp: K -> K -> Cmp, ~crefl: CRefl(~K, ~cmp), ~ceq: CEq(~K, ~cmp), ~cflip: CFlip(~K, ~cmp), ~ctrans: CTrans(~K, ~cmp),
+  ~agree: Agree(~K, ~cmp, ~eq), fuel: Nat, ds: List<&2, K>, +g: List<&2, P.Node<K>>, +path: List<&2, K>, +done: List<&2, K>
+) -> {FGO(~K, ~eq, ~cmp, fuel, ds, g, path, done) == walked(~K, ~cmp, P.go(~K, ~eq, fuel, ds, g, path, done)) : Result<&2, &2, P.Error<K>, P.Walk<K>>}:
+  match fuel:
+    case 0n:
+      out_eq(~K, ~cmp, ds, done)
+    case 1n+(+f):
+      match ds:
+        case Nil{}:
+          {==}
+        case Con{+d, +rest}:
+          +gi = P.gidx(~K, ~cmp, g)
+          +pi = P.idx(~K, ~cmp, path)
+          +di = P.idx(~K, ~cmp, done)
+          %Equal.sym(Bool, IHas(~K, ~cmp, P.idx(~K, ~cmp, done), d), P.member(~K, ~eq, done, d), ihas(~K, ~cmp, ~eq, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, done, d)) :
+            {P.fast.at(K, RW(K), _, IHas(~K, ~cmp, pi, d), GGet(~K, ~cmp, gi, d),
+               u => P.go.fast(~K, ~eq, ~cmp, 1n+f, rest, gi, path, pi, done, di),
+               u => Fail{P.cycle(~K, ~eq, path, d)},
+               u => Fail{P.Missing{d, P.rev(K, path, Nil{})}},
+               dd => P.fast.then(K, P.go.fast(~K, ~eq, ~cmp, f, dd, gi, d <> path, OMap.OSet.add(~K, ~cmp, pi, d), done, di),
+                 x => xi => P.go.fast(~K, ~eq, ~cmp, 1n+f, rest, gi, path, pi, d <> x, OMap.OSet.add(~K, ~cmp, xi, d))))
+             == walked(~K, ~cmp, P.go(~K, ~eq, 1n+f, d <> rest, g, path, done)) : RW(K)}
+          %Equal.sym(Bool, IHas(~K, ~cmp, P.idx(~K, ~cmp, path), d), P.member(~K, ~eq, path, d), ihas(~K, ~cmp, ~eq, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, path, d)) :
+            {P.fast.at(K, RW(K), P.member(~K, ~eq, done, d), _, GGet(~K, ~cmp, gi, d),
+               u => P.go.fast(~K, ~eq, ~cmp, 1n+f, rest, gi, path, pi, done, di),
+               u => Fail{P.cycle(~K, ~eq, path, d)},
+               u => Fail{P.Missing{d, P.rev(K, path, Nil{})}},
+               dd => P.fast.then(K, P.go.fast(~K, ~eq, ~cmp, f, dd, gi, d <> path, OMap.OSet.add(~K, ~cmp, pi, d), done, di),
+                 x => xi => P.go.fast(~K, ~eq, ~cmp, 1n+f, rest, gi, path, pi, d <> x, OMap.OSet.add(~K, ~cmp, xi, d))))
+             == walked(~K, ~cmp, P.go(~K, ~eq, 1n+f, d <> rest, g, path, done)) : RW(K)}
+          %Equal.sym(Maybe<&2, List<&2, K>>, GGet(~K, ~cmp, P.gidx(~K, ~cmp, g), d), P.deps(~K, ~eq, g, d), gget(~K, ~cmp, ~eq, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, g, d)) :
+            {P.fast.at(K, RW(K), P.member(~K, ~eq, done, d), P.member(~K, ~eq, path, d), _,
+               u => P.go.fast(~K, ~eq, ~cmp, 1n+f, rest, gi, path, pi, done, di),
+               u => Fail{P.cycle(~K, ~eq, path, d)},
+               u => Fail{P.Missing{d, P.rev(K, path, Nil{})}},
+               dd => P.fast.then(K, P.go.fast(~K, ~eq, ~cmp, f, dd, gi, d <> path, OMap.OSet.add(~K, ~cmp, pi, d), done, di),
+                 x => xi => P.go.fast(~K, ~eq, ~cmp, 1n+f, rest, gi, path, pi, d <> x, OMap.OSet.add(~K, ~cmp, xi, d))))
+             == walked(~K, ~cmp, P.go(~K, ~eq, 1n+f, d <> rest, g, path, done)) : RW(K)}
+          at_eq(~K, ~cmp, P.member(~K, ~eq, done, d), P.member(~K, ~eq, path, d), P.deps(~K, ~eq, g, d),
+            u => P.go.fast(~K, ~eq, ~cmp, 1n+f, rest, gi, path, pi, done, di),
+            u => P.go(~K, ~eq, 1n+f, rest, g, path, done),
+            u => Fail{P.cycle(~K, ~eq, path, d)},
+            u => Fail{P.cycle(~K, ~eq, path, d)},
+            u => Fail{P.Missing{d, P.rev(K, path, Nil{})}},
+            u => Fail{P.Missing{d, P.rev(K, path, Nil{})}},
+            dd => P.fast.then(K, P.go.fast(~K, ~eq, ~cmp, f, dd, gi, d <> path, OMap.OSet.add(~K, ~cmp, pi, d), done, di),
+              x => xi => P.go.fast(~K, ~eq, ~cmp, 1n+f, rest, gi, path, pi, d <> x, OMap.OSet.add(~K, ~cmp, xi, d))),
+            dd => P.go.then(K, P.go(~K, ~eq, f, dd, g, d <> path, done), r => P.go(~K, ~eq, 1n+f, rest, g, path, d <> r)),
+            go_fast_eq(~K, ~eq, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, 1n+f, rest, g, path, done),
+            {==}, {==},
+            +dd => (%Equal.sym(RW(K), FGO(~K, ~eq, ~cmp, f, dd, g, d <> path, done), walked(~K, ~cmp, P.go(~K, ~eq, f, dd, g, d <> path, done)), go_fast_eq(~K, ~eq, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, f, dd, g, d <> path, done)) :
+                {P.fast.then(K, _, x => xi => P.go.fast(~K, ~eq, ~cmp, 1n+f, rest, gi, path, pi, d <> x, OMap.OSet.add(~K, ~cmp, xi, d)))
+                 == walked(~K, ~cmp, P.go.then(K, P.go(~K, ~eq, f, dd, g, d <> path, done), r => P.go(~K, ~eq, 1n+f, rest, g, path, d <> r))) : RW(K)}
+              then_eq(~K, ~cmp, P.go(~K, ~eq, f, dd, g, d <> path, done),
+                x => xi => P.go.fast(~K, ~eq, ~cmp, 1n+f, rest, gi, path, pi, d <> x, OMap.OSet.add(~K, ~cmp, xi, d)),
+                r => P.go(~K, ~eq, 1n+f, rest, g, path, d <> r),
+                x => go_fast_eq(~K, ~eq, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, 1n+f, rest, g, path, d <> x))))
+
+def fin_eq(
+  ~K: Data, ~eq: K -> K -> Bool, ~cmp: K -> K -> Cmp, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), r: Result<&2, &2, P.Error<K>, List<&2, K>>,
+  +g: List<&2, P.Node<K>>, +ts: List<&2, K>, hg: Good(~K, ~eq, g, ts, ts, Nil{}, Nil{}, r)
+) -> {P.plan.fast.fin(K, walked(~K, ~cmp, r)) == P.plan.check(~K, ~eq, g, ts, r) : Result<&2, &2, P.Error<K>, List<&2, K>>}:
+  match r:
+    case Fail{e}:
+      {==}
+    case Done{+x}:
+      +p = P.rev(K, x, Nil{})
+      %Equal.sym(Bool, P.valid(~K, ~eq, g, ts, p), True{}, valid_of_post(~K, ~eq, ~sound, ~refl, g, ts, x, hg)) : {Done{p} == P.plan.ok(K, _, p) : Result<&2, &2, P.Error<K>, List<&2, K>>}
+      {==}
+
+def Laws.plan_index(K, eq, cmp, crefl, ceq, cflip, ctrans, agree, g, ts):
+  +g = g
+  +ts = ts
+  +r = P.go(~K, ~eq, 1n+Len(K, g), ts, g, Nil{}, Nil{})
+  %Equal.sym(RW(K), FGO(~K, ~eq, ~cmp, 1n+Len(K, g), ts, g, Nil{}, Nil{}), walked(~K, ~cmp, r), go_fast_eq(~K, ~eq, ~cmp, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, 1n+Len(K, g), ts, g, Nil{}, Nil{})) :
+    {P.plan.fast.fin(K, _) == P.plan(~K, ~eq, g, ts) : Result<&2, &2, P.Error<K>, List<&2, K>>}
+  fin_eq(~K, ~eq, ~cmp, ~(x => y => h => sound_of(~K, ~cmp, ~eq, ~ceq, ~agree, x, y, h)), ~(x => refl_of(~K, ~cmp, ~eq, ~crefl, ~agree, x)), r, g, ts,
+    plan_good(~K, ~eq, ~(x => y => h => sound_of(~K, ~cmp, ~eq, ~ceq, ~agree, x, y, h)), ~(x => refl_of(~K, ~cmp, ~eq, ~crefl, ~agree, x)), g, ts))
+
+# Indexes: invalidation
+# ---------------------
+
+def any_fast(
+  ~K: Data, ~cmp: K -> K -> Cmp, ~eq: K -> K -> Bool, ~crefl: CRefl(~K, ~cmp), ~ceq: CEq(~K, ~cmp), ~cflip: CFlip(~K, ~cmp), ~ctrans: CTrans(~K, ~cmp),
+  ~agree: Agree(~K, ~cmp, ~eq), xs: List<&2, K>, +acc: List<&2, K>
+) -> {P.any_in.fast(~K, ~cmp, xs, P.idx(~K, ~cmp, acc)) == P.any_in(~K, ~eq, xs, acc) : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      %Equal.sym(Bool, IHas(~K, ~cmp, P.idx(~K, ~cmp, acc), x), P.member(~K, ~eq, acc, x), ihas(~K, ~cmp, ~eq, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, acc, x)) :
+        {Bool.or(_, P.any_in.fast(~K, ~cmp, t, P.idx(~K, ~cmp, acc))) == Bool.or(P.member(~K, ~eq, acc, x), P.any_in(~K, ~eq, t, acc)) : Bool}
+      %Equal.sym(Bool, P.any_in.fast(~K, ~cmp, t, P.idx(~K, ~cmp, acc)), P.any_in(~K, ~eq, t, acc), any_fast(~K, ~cmp, ~eq, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, t, acc)) :
+        {Bool.or(P.member(~K, ~eq, acc, x), _) == Bool.or(P.member(~K, ~eq, acc, x), P.any_in(~K, ~eq, t, acc)) : Bool}
+      {==}
+
+def idx_if(~K: Data, ~cmp: K -> K -> Cmp, c: Bool, +x: K, +acc: List<&2, K>) ->
+  {P.idx.if(~K, ~cmp, c, x, P.idx(~K, ~cmp, acc)) == P.idx(~K, ~cmp, P.invalidate.if(K, c, x, acc)) : OMap.OSet(K)}:
+  match c:
+    case True{}:
+      {==}
+    case False{}:
+      {==}
+
+def inv_fast_eq(
+  ~K: Data, ~cmp: K -> K -> Cmp, ~eq: K -> K -> Bool, ~crefl: CRefl(~K, ~cmp), ~ceq: CEq(~K, ~cmp), ~cflip: CFlip(~K, ~cmp), ~ctrans: CTrans(~K, ~cmp),
+  ~agree: Agree(~K, ~cmp, ~eq), p: List<&2, K>, +g: List<&2, P.Node<K>>, +changed: List<&2, K>, +acc: List<&2, K>
+) -> {P.invalidate.fast.go(~K, ~cmp, p, P.gidx(~K, ~cmp, g), P.idx(~K, ~cmp, changed), acc, P.idx(~K, ~cmp, acc))
+      == P.invalidate.go(~K, ~eq, p, g, changed, acc) : List<&2, K>}:
+  match p:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      +gi = P.gidx(~K, ~cmp, g)
+      +ci = P.idx(~K, ~cmp, changed)
+      +dn = P.deps.or_nil(~K, ~eq, g, x)
+      +hit = Bool.or(P.member(~K, ~eq, changed, x), P.any_in(~K, ~eq, dn, acc))
+      +hdeps = Equal.cong(Maybe<&2, List<&2, K>>, List<&2, K>, m => Maybe.default(&2, List<&2, K>, m, Nil{}),
+        GGet(~K, ~cmp, gi, x), P.deps(~K, ~eq, g, x), gget(~K, ~cmp, ~eq, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, g, x))
+      %Equal.sym(Bool, IHas(~K, ~cmp, P.idx(~K, ~cmp, changed), x), P.member(~K, ~eq, changed, x), ihas(~K, ~cmp, ~eq, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, changed, x)) :
+        {P.invalidate.fast.go(~K, ~cmp, t, gi, ci,
+           P.invalidate.if(K, Bool.or(_, P.any_in.fast(~K, ~cmp, P.deps.fast(~K, ~cmp, gi, x), P.idx(~K, ~cmp, acc))), x, acc),
+           P.idx.if(~K, ~cmp, Bool.or(_, P.any_in.fast(~K, ~cmp, P.deps.fast(~K, ~cmp, gi, x), P.idx(~K, ~cmp, acc))), x, P.idx(~K, ~cmp, acc)))
+         == P.invalidate.go(~K, ~eq, x <> t, g, changed, acc) : List<&2, K>}
+      %Equal.sym(List<&2, K>, P.deps.fast(~K, ~cmp, gi, x), dn, hdeps) :
+        {P.invalidate.fast.go(~K, ~cmp, t, gi, ci,
+           P.invalidate.if(K, Bool.or(P.member(~K, ~eq, changed, x), P.any_in.fast(~K, ~cmp, _, P.idx(~K, ~cmp, acc))), x, acc),
+           P.idx.if(~K, ~cmp, Bool.or(P.member(~K, ~eq, changed, x), P.any_in.fast(~K, ~cmp, _, P.idx(~K, ~cmp, acc))), x, P.idx(~K, ~cmp, acc)))
+         == P.invalidate.go(~K, ~eq, x <> t, g, changed, acc) : List<&2, K>}
+      %Equal.sym(Bool, P.any_in.fast(~K, ~cmp, dn, P.idx(~K, ~cmp, acc)), P.any_in(~K, ~eq, dn, acc), any_fast(~K, ~cmp, ~eq, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, dn, acc)) :
+        {P.invalidate.fast.go(~K, ~cmp, t, gi, ci,
+           P.invalidate.if(K, Bool.or(P.member(~K, ~eq, changed, x), _), x, acc),
+           P.idx.if(~K, ~cmp, Bool.or(P.member(~K, ~eq, changed, x), _), x, P.idx(~K, ~cmp, acc)))
+         == P.invalidate.go(~K, ~eq, x <> t, g, changed, acc) : List<&2, K>}
+      %Equal.sym(OMap.OSet(K), P.idx.if(~K, ~cmp, hit, x, P.idx(~K, ~cmp, acc)), P.idx(~K, ~cmp, P.invalidate.if(K, hit, x, acc)), idx_if(~K, ~cmp, hit, x, acc)) :
+        {P.invalidate.fast.go(~K, ~cmp, t, gi, ci, P.invalidate.if(K, hit, x, acc), _) == P.invalidate.go(~K, ~eq, x <> t, g, changed, acc) : List<&2, K>}
+      inv_fast_eq(~K, ~cmp, ~eq, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, t, g, changed, P.invalidate.if(K, hit, x, acc))
+
+def Laws.stale_index(K, eq, cmp, crefl, ceq, cflip, ctrans, agree, p, g, changed):
+  inv_fast_eq(~K, ~cmp, ~eq, ~crefl, ~ceq, ~cflip, ~ctrans, ~agree, p, g, changed, Nil{})
 
 # Fixtures
 # --------

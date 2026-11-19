@@ -4,6 +4,8 @@ import bend-kit-bytes@0.3.3.0/bytes.bend as Bytes
 import bend-kit-hash@0.3.0.4/hash.bend as Hash
 import bend-kit-files@0.3.1.0/files.bend as Files
 import bend-kit-process@0.5.0.1/process.bend as Proc
+import bend-kit-collections@0.1.5.0/omap.bend as OMap
+import bend-kit-collections@0.1.5.0/order.bend as Order
 
 # A node and the nodes it requires. Its prerequisites must succeed before it runs.
 type Node<-K: Data> is Data:
@@ -228,6 +230,101 @@ def plan.check(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, Node<K>>, +ts: List<&
 def plan(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, Node<K>>, +ts: List<&2, K>) -> Result<&2, &2, Error<K>, List<&2, K>>:
   plan.check(~K, ~eq, g, ts, go(~K, ~eq, 1n+List.length(&2, Node<K>, g), ts, g, Nil{}, Nil{}))
 
+# Indexed planning
+# ----------------
+# The same plan in O(n log n) comparisons: sets and the graph live in ordered maps under cmp.
+
+def idx(~K: Data, ~cmp: K -> K -> Cmp, xs: List<&2, K>) -> OMap.OSet(K):
+  match xs:
+    case Nil{}:
+      OMap.OSet.new(K)
+    case Con{+x, t}:
+      OMap.OSet.add(~K, ~cmp, idx(~K, ~cmp, t), x)
+
+# The prerequisites of each node; the first node with an id wins, as deps does.
+def gidx(~K: Data, ~cmp: K -> K -> Cmp, g: List<&2, Node<K>>) -> OMap.OMap<K, List<&2, K>>:
+  match g:
+    case Nil{}:
+      OMap.OMap.new(K, List<&2, K>)
+    case Con{Node{+id, +ds}, t}:
+      OMap.OMap.put(~K, ~List<&2, K>, ~cmp, gidx(~K, ~cmp, t), id, ds)
+
+# A walk's finished nodes and their index.
+type Walk<-K: Data> is Data:
+  Walk{done: List<&2, K>, idx: OMap.OSet(K)}
+
+def fast.at(-K: Data, -R: Type, seen: Bool, open: Bool, m: Maybe<&2, List<&2, K>>, skip: Unit -> R, loop: Unit -> R, missing: Unit -> R, child: List<&2, K> -> R) -> R:
+  match seen:
+    case True{}:
+      skip(Unit{})
+    case False{}:
+      match open:
+        case True{}:
+          loop(Unit{})
+        case False{}:
+          match m:
+            case None{}:
+              missing(Unit{})
+            case Some{dd}:
+              child(dd)
+
+def fast.then(-K: Data, r: Result<&2, &2, Error<K>, Walk<K>>, k: List<&2, K> -> OMap.OSet(K) -> Result<&2, &2, Error<K>, Walk<K>>) -> Result<&2, &2, Error<K>, Walk<K>>:
+  match r:
+    case Fail{e}:
+      Fail{e}
+    case Done{Walk{x, xi}}:
+      k(x)(xi)
+
+def fast.out(-K: Data, ds: List<&2, K>, done: List<&2, K>, di: OMap.OSet(K)) -> Result<&2, &2, Error<K>, Walk<K>>:
+  match ds:
+    case Nil{}:
+      Done{Walk{done, di}}
+    case Con{d, t}:
+      Fail{Refused{}}
+
+# go, with path, done, and the graph also held in ordered maps.
+def go.fast(
+  ~K: Data, ~eq: K -> K -> Bool, ~cmp: K -> K -> Cmp, fuel: Nat, ds: List<&2, K>, +gi: OMap.OMap<K, List<&2, K>>,
+  +path: List<&2, K>, +pi: OMap.OSet(K), +done: List<&2, K>, +di: OMap.OSet(K)
+) -> Result<&2, &2, Error<K>, Walk<K>>:
+  match fuel:
+    case 0n:
+      fast.out(K, ds, done, di)
+    case 1n+(+f):
+      match ds:
+        case Nil{}:
+          Done{Walk{done, di}}
+        case Con{+d, +rest}:
+          fast.at(K, Result<&2, &2, Error<K>, Walk<K>>,
+            OMap.OSet.has(~K, ~cmp, di, d), OMap.OSet.has(~K, ~cmp, pi, d), OMap.OMap.get(~K, ~List<&2, K>, ~cmp, gi, d),
+            u => go.fast(~K, ~eq, ~cmp, 1n+f, rest, gi, path, pi, done, di),
+            u => Fail{cycle(~K, ~eq, path, d)},
+            u => Fail{Missing{d, rev(K, path, Nil{})}},
+            dd => fast.then(K, go.fast(~K, ~eq, ~cmp, f, dd, gi, d <> path, OMap.OSet.add(~K, ~cmp, pi, d), done, di),
+              x => xi => go.fast(~K, ~eq, ~cmp, 1n+f, rest, gi, path, pi, d <> x, OMap.OSet.add(~K, ~cmp, xi, d))))
+
+def any_in.fast(~K: Data, ~cmp: K -> K -> Cmp, xs: List<&2, K>, +s: OMap.OSet(K)) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case Con{+x, t}:
+      Bool.or(OMap.OSet.has(~K, ~cmp, s, x), any_in.fast(~K, ~cmp, t, s))
+
+def deps.fast(~K: Data, ~cmp: K -> K -> Cmp, +gi: OMap.OMap<K, List<&2, K>>, +x: K) -> List<&2, K>:
+  Maybe.default(&2, List<&2, K>, OMap.OMap.get(~K, ~List<&2, K>, ~cmp, gi, x), Nil{})
+
+def plan.fast.fin(-K: Data, r: Result<&2, &2, Error<K>, Walk<K>>) -> Result<&2, &2, Error<K>, List<&2, K>>:
+  match r:
+    case Fail{e}:
+      Fail{e}
+    case Done{Walk{out, oi}}:
+      Done{rev(K, out, Nil{})}
+
+# plan, in O(n log n) comparisons when cmp is a total order whose EQ agrees with eq.
+# The walk is proved valid, so the check that plan runs is left out.
+def plan.fast(~K: Data, ~eq: K -> K -> Bool, ~cmp: K -> K -> Cmp, +g: List<&2, Node<K>>, +ts: List<&2, K>) -> Result<&2, &2, Error<K>, List<&2, K>>:
+  plan.fast.fin(K, go.fast(~K, ~eq, ~cmp, 1n+List.length(&2, Node<K>, g), ts, gidx(~K, ~cmp, g), Nil{}, OMap.OSet.new(K), Nil{}, OMap.OSet.new(K)))
+
 # Invalidation
 # ------------
 
@@ -249,6 +346,27 @@ def invalidate.go(~K: Data, ~eq: K -> K -> Bool, p: List<&2, K>, +g: List<&2, No
 # The nodes of p that changed or require a stale node, latest first.
 def invalidate(~K: Data, ~eq: K -> K -> Bool, p: List<&2, K>, +g: List<&2, Node<K>>, +changed: List<&2, K>) -> List<&2, K>:
   invalidate.go(~K, ~eq, p, g, changed, Nil{})
+
+def idx.if(~K: Data, ~cmp: K -> K -> Cmp, hit: Bool, +x: K, s: OMap.OSet(K)) -> OMap.OSet(K):
+  match hit:
+    case True{}:
+      OMap.OSet.add(~K, ~cmp, s, x)
+    case False{}:
+      s
+
+def invalidate.fast.go(
+  ~K: Data, ~cmp: K -> K -> Cmp, p: List<&2, K>, +gi: OMap.OMap<K, List<&2, K>>, +ci: OMap.OSet(K), +acc: List<&2, K>, +ai: OMap.OSet(K)
+) -> List<&2, K>:
+  match p:
+    case Nil{}:
+      acc
+    case Con{+x, t}:
+      +hit = Bool.or(OMap.OSet.has(~K, ~cmp, ci, x), any_in.fast(~K, ~cmp, deps.fast(~K, ~cmp, gi, x), ai))
+      invalidate.fast.go(~K, ~cmp, t, gi, ci, invalidate.if(K, hit, x, acc), idx.if(~K, ~cmp, hit, x, ai))
+
+# invalidate, in O(n log n) comparisons when cmp is a total order whose EQ agrees with eq.
+def invalidate.fast(~K: Data, ~cmp: K -> K -> Cmp, p: List<&2, K>, +g: List<&2, Node<K>>, +changed: List<&2, K>) -> List<&2, K>:
+  invalidate.fast.go(~K, ~cmp, p, gidx(~K, ~cmp, g), idx(~K, ~cmp, changed), Nil{}, OMap.OSet.new(K))
 
 # Execution
 # ---------
@@ -981,6 +1099,10 @@ def outcomes(p: List<&2, String>, +st: List<&2, Entry<String>>, +logs: List<&2, 
     case Con{+x, t}:
       outcome.of(status(~String, ~String.eq, st, x), x, ran.find(logs, x), outcomes(t, st, logs))
 
+# Equal strings, as the order that build indexes them by sees them.
+def String.same(a: String, b: String) -> Bool:
+  Cmp.is_eq(Order.string(a, b))
+
 def build.ids(m: Maybe<&2, String>) -> Run(Unit):
   match m:
     case None{}:
@@ -1009,10 +1131,10 @@ def build(+tasks: List<&2, Task>, +targets: List<&2, String>, +dir: String, +pat
   +limit = U32.to_nat(U32.max(jobs, 1))
   do Run<List<&2, Outcome>>:
     build.ids(ids.bad(tasks))
-    +p : List<&2, String> <- build.plan(plan(~String, ~String.eq, g, targets))
+    +p : List<&2, String> <- build.plan(plan.fast(~String, ~String.same, ~Order.string, g, targets))
     +old : List<&2, Stamp> <- Run.lift(List<&2, Stamp>, stamps.read(path))
     +now : List<&2, Stamp> <- Run.lift(List<&2, Stamp>, stamps.now(p, tasks, dir, Nil{}))
-    +stale : List<&2, String> = invalidate(~String, ~String.eq, p, g, changed(p, old, now))
+    +stale : List<&2, String> = invalidate.fast(~String, ~Order.string, p, g, changed(p, old, now))
     +chan : Chan(Msg) <- Run.lift(Chan(Msg), Chan.new(Msg, U32.max(jobs, 1)))
     l : Ledger <- Run.lift(Ledger, run.par(1n+List.length(&2, String, p), p, tasks, g, stale, limit, Pool{Nil{}, Nil{}, Nil{}}, Nil{}, dir, chan))
     build.done(path, p, now, old, l)
