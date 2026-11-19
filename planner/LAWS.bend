@@ -31,6 +31,40 @@ def upward(~K: Data, ~eq: K -> K -> Bool, p: List<&2, K>, +g: List<&2, P.Node<K>
 def run(~K: Data, ~eq: K -> K -> Bool, p: List<&2, K>, +g: List<&2, P.Node<K>>, +stale: List<&2, K>, +rs: List<&2, Bool>) -> List<&2, P.Entry<K>>:
   P.exec(~K, ~eq, p, g, stale, Nil{}, rs)
 
+# x is required by the node before it, or is a target when nothing comes before it.
+def req(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, m: Maybe<&2, K>, +x: K) -> Bool:
+  match m:
+    case None{}:
+      P.member(~K, ~eq, ts, x)
+    case Some{y}:
+      P.member(~K, ~eq, P.deps.or_nil(~K, ~eq, g, y), x)
+
+# Each node of xs is required by the one before it; the first by m, or by the targets when m is None.
+def linked(~K: Data, ~eq: K -> K -> Bool, xs: List<&2, K>, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +m: Maybe<&2, K>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case Con{+x, t}:
+      Bool.and(req(~K, ~eq, g, ts, m, x), linked(~K, ~eq, t, g, ts, Some{x}))
+
+# The last node of xs is x.
+def ends(~K: Data, ~eq: K -> K -> Bool, xs: List<&2, K>, +x: K) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case Con{y, Nil{}}:
+      eq(y, x)
+    case Con{y, t}:
+      ends(~K, ~eq, t, x)
+
+# c is a cycle: each node requires the next, and the last is the first.
+def cycle_ok(~K: Data, ~eq: K -> K -> Bool, c: List<&2, K>, +g: List<&2, P.Node<K>>) -> Bool:
+  match c:
+    case Nil{}:
+      False{}
+    case Con{+x, +t}:
+      Bool.and(linked(~K, ~eq, t, g, Nil{}, Some{x}), ends(~K, ~eq, t, x))
+
 # Plans
 # -----
 # Every law takes eq as sound: eq(x, y) gives x == y.
@@ -154,6 +188,59 @@ law plan_cycle_target:
   for hct: {P.member(~K, ~eq, c, t) == True{} : Bool}
   for p: List<&2, K>
   for h: {P.plan(~K, ~eq, g, ts) == Done{p} : Result<&2, &2, P.Error<K>, List<&2, K>>}
+  Empty
+
+# Errors and completeness
+# -----------------------
+# These laws also take eq as reflexive.
+
+# A missing node is undefined,
+law plan_missing:
+  for ~K: Data
+  for ~eq: K -> K -> Bool
+  for ~sound: @x: K -> @y: K -> {eq(x, y) == True{} : Bool} -> {x == y : K}
+  for ~refl: @x: K -> {eq(x, x) == True{} : Bool}
+  for g: List<&2, P.Node<K>>
+  for ts: List<&2, K>
+  for n: K
+  for c: List<&2, K>
+  for h: {P.plan(~K, ~eq, g, ts) == Fail{P.Missing{n, c}} : Result<&2, &2, P.Error<K>, List<&2, K>>}
+  {P.deps(~K, ~eq, g, n) == None{} : Maybe<&2, List<&2, K>>}
+
+# and its chain runs from a target, through nodes that each require the next, to it.
+law plan_missing_chain:
+  for ~K: Data
+  for ~eq: K -> K -> Bool
+  for ~sound: @x: K -> @y: K -> {eq(x, y) == True{} : Bool} -> {x == y : K}
+  for ~refl: @x: K -> {eq(x, x) == True{} : Bool}
+  for g: List<&2, P.Node<K>>
+  for ts: List<&2, K>
+  for n: K
+  for c: List<&2, K>
+  for h: {P.plan(~K, ~eq, g, ts) == Fail{P.Missing{n, c}} : Result<&2, &2, P.Error<K>, List<&2, K>>}
+  {linked(~K, ~eq, P.cat(K, c, [n]), g, ts, None{}) == True{} : Bool}
+
+# A reported cycle is a cycle.
+law plan_cycle_path:
+  for ~K: Data
+  for ~eq: K -> K -> Bool
+  for ~sound: @x: K -> @y: K -> {eq(x, y) == True{} : Bool} -> {x == y : K}
+  for ~refl: @x: K -> {eq(x, x) == True{} : Bool}
+  for g: List<&2, P.Node<K>>
+  for ts: List<&2, K>
+  for c: List<&2, K>
+  for h: {P.plan(~K, ~eq, g, ts) == Fail{P.Cycle{c}} : Result<&2, &2, P.Error<K>, List<&2, K>>}
+  {cycle_ok(~K, ~eq, c, g) == True{} : Bool}
+
+# plan never refuses. So it fails only on a true missing node or a true cycle, and plans every other graph.
+law plan_complete:
+  for ~K: Data
+  for ~eq: K -> K -> Bool
+  for ~sound: @x: K -> @y: K -> {eq(x, y) == True{} : Bool} -> {x == y : K}
+  for ~refl: @x: K -> {eq(x, x) == True{} : Bool}
+  for g: List<&2, P.Node<K>>
+  for ts: List<&2, K>
+  for h: {P.plan(~K, ~eq, g, ts) == Fail{P.Refused{}} : Result<&2, &2, P.Error<K>, List<&2, K>>}
   Empty
 
 # Invalidation

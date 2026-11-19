@@ -138,73 +138,75 @@ def valid(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, Node<K>>, +ts: List<&2, K>
 # Planning
 # --------
 
-type Frame<-K: Data> is Data:
-  Visit{node: K}
-  Leave{node: K}
-
-# Each arm is a closure, so only the taken one runs.
-def branch(-A: Type, c: Bool, yes: Unit -> A, no: Unit -> A) -> A:
-  match c:
-    case True{}:
-      yes(Unit{})
-    case False{}:
-      no(Unit{})
-
-def maybe.case(-A: Data, -R: Type, m: Maybe<&2, A>, none: Unit -> R, some: A -> R) -> R:
-  match m:
-    case None{}:
-      none(Unit{})
-    case Some{x}:
-      some(x)
-
-def enters(-K: Data, xs: List<&2, K>, rest: List<&2, Frame<K>>) -> List<&2, Frame<K>>:
-  match xs:
-    case Nil{}:
-      rest
-    case Con{x, t}:
-      Visit{x} <> enters(K, t, rest)
-
-# The open path up to and including k, nearest first.
-def upto(~K: Data, ~eq: K -> K -> Bool, path: List<&2, K>, +k: K) -> List<&2, K>:
+# The open path from the node eq to k, nearest last, then acc.
+def cyc(~K: Data, ~eq: K -> K -> Bool, path: List<&2, K>, +k: K, +acc: List<&2, K>) -> List<&2, K>:
   match path:
     case Nil{}:
-      Nil{}
+      acc
     case Con{+x, t}:
-      when(List<&2, K>, u => x <> upto(~K, ~eq, t, k), eq(k, x), [x])
+      when(List<&2, K>, u => cyc(~K, ~eq, t, k, x <> acc), eq(k, x), x <> acc)
 
 def cycle(~K: Data, ~eq: K -> K -> Bool, path: List<&2, K>, +k: K) -> Error<K>:
-  Cycle{cat(K, rev(K, upto(~K, ~eq, path, k), Nil{}), [k])}
+  Cycle{cyc(~K, ~eq, path, k, [k])}
 
-# One step per frame. path holds the open nodes, nearest first; out the finished ones, last first.
-def visit(
-  ~K: Data, ~eq: K -> K -> Bool, fuel: Nat, +g: List<&2, Node<K>>,
-  stack: List<&2, Frame<K>>, +path: List<&2, K>, +out: List<&2, K>
+def go.node(-K: Data, -R: Type, m: Maybe<&2, List<&2, K>>, missing: Unit -> R, child: List<&2, K> -> R) -> R:
+  match m:
+    case None{}:
+      missing(Unit{})
+    case Some{dd}:
+      child(dd)
+
+def go.open(-K: Data, -R: Type, open: Bool, m: Unit -> Maybe<&2, List<&2, K>>, loop: Unit -> R, missing: Unit -> R, child: List<&2, K> -> R) -> R:
+  match open:
+    case True{}:
+      loop(Unit{})
+    case False{}:
+      go.node(K, R, m(Unit{}), missing, child)
+
+# One node d: skip it when done, report a cycle when open, report it when missing, else visit its prerequisites.
+def go.at(
+  -K: Data, -R: Type, seen: Bool, open: Unit -> Bool, m: Unit -> Maybe<&2, List<&2, K>>,
+  skip: Unit -> R, loop: Unit -> R, missing: Unit -> R, child: List<&2, K> -> R
+) -> R:
+  match seen:
+    case True{}:
+      skip(Unit{})
+    case False{}:
+      go.open(K, R, open(Unit{}), m, loop, missing, child)
+
+def go.then(-K: Data, r: Result<&2, &2, Error<K>, List<&2, K>>, k: List<&2, K> -> Result<&2, &2, Error<K>, List<&2, K>>) -> Result<&2, &2, Error<K>, List<&2, K>>:
+  match r:
+    case Fail{e}:
+      Fail{e}
+    case Done{x}:
+      k(x)
+
+def go.out(-K: Data, ds: List<&2, K>, done: List<&2, K>) -> Result<&2, &2, Error<K>, List<&2, K>>:
+  match ds:
+    case Nil{}:
+      Done{done}
+    case Con{d, t}:
+      Fail{Refused{}}
+
+# A depth-first walk of ds. path holds the open nodes, nearest first; done the finished ones, last first.
+# Each level of path costs one unit of fuel.
+def go(
+  ~K: Data, ~eq: K -> K -> Bool, fuel: Nat, ds: List<&2, K>, +g: List<&2, Node<K>>,
+  +path: List<&2, K>, +done: List<&2, K>
 ) -> Result<&2, &2, Error<K>, List<&2, K>>:
   match fuel:
     case 0n:
-      Fail{Refused{}}
+      go.out(K, ds, done)
     case 1n+(+f):
-      match stack:
+      match ds:
         case Nil{}:
-          Done{out}
-        case Con{Leave{k}, rest}:
-          visit(~K, ~eq, f, g, rest, List.tail(&2, K, path), k <> out)
-        case Con{Visit{+k}, +rest}:
-          branch(Result<&2, &2, Error<K>, List<&2, K>>, member(~K, ~eq, out, k),
-            u => visit(~K, ~eq, f, g, rest, path, out),
-            u => branch(Result<&2, &2, Error<K>, List<&2, K>>, member(~K, ~eq, path, k),
-              u => Fail{cycle(~K, ~eq, path, k)},
-              u => maybe.case(List<&2, K>, Result<&2, &2, Error<K>, List<&2, K>>, deps(~K, ~eq, g, k),
-                u => Fail{Missing{k, rev(K, path, Nil{})}},
-                ds => visit(~K, ~eq, f, g, enters(K, ds, Leave{k} <> rest), k <> path, out))))
-
-# Enough steps: one per target, and one per node and per edge, plus the final one.
-def fuel(-K: Data, g: List<&2, Node<K>>, n: Nat) -> Nat:
-  match g:
-    case Nil{}:
-      1n+n
-    case Con{Node{id, ds}, t}:
-      fuel(K, t, Nat.add(1n+List.length(&2, K, ds), n))
+          Done{done}
+        case Con{+d, +rest}:
+          go.at(K, Result<&2, &2, Error<K>, List<&2, K>>, member(~K, ~eq, done, d), u => member(~K, ~eq, path, d), u => deps(~K, ~eq, g, d),
+            u => go(~K, ~eq, 1n+f, rest, g, path, done),
+            u => Fail{cycle(~K, ~eq, path, d)},
+            u => Fail{Missing{d, rev(K, path, Nil{})}},
+            dd => go.then(K, go(~K, ~eq, f, dd, g, d <> path, done), r => go(~K, ~eq, 1n+f, rest, g, path, d <> r)))
 
 def plan.ok(-K: Data, c: Bool, p: List<&2, K>) -> Result<&2, &2, Error<K>, List<&2, K>>:
   match c:
@@ -222,9 +224,9 @@ def plan.check(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, Node<K>>, +ts: List<&
       plan.ok(K, valid(~K, ~eq, g, ts, p), p)
 
 # The closure of ts in dependency order, each node once; or why there is none.
+# A path never repeats a node, and each node on it is defined, so one level per node is enough fuel.
 def plan(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, Node<K>>, +ts: List<&2, K>) -> Result<&2, &2, Error<K>, List<&2, K>>:
-  plan.check(~K, ~eq, g, ts,
-    visit(~K, ~eq, fuel(K, g, List.length(&2, K, ts)), g, enters(K, ts, Nil{}), Nil{}, Nil{}))
+  plan.check(~K, ~eq, g, ts, go(~K, ~eq, 1n+List.length(&2, Node<K>, g), ts, g, Nil{}, Nil{}))
 
 # Invalidation
 # ------------
