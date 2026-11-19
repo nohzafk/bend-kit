@@ -8,6 +8,7 @@ When you change `<pkg>.bend` or `effs/`, raise `VERSION` and add a line here for
 
 ## Unreleased
 
+- `planner` 0.3.0.0: prove that `plan` never refuses, that a reported missing node is undefined and its chain is a real requirement path from a target, and that a reported cycle is a real cycle. The walk is now a recursive depth-first search with one level of fuel per node. The stack-walk helpers (`visit`, `Frame`, `enters`, `fuel`, `upto`) are gone. Breaking only for callers of those helpers.
 - `planner` 0.2.0.0: `build` returns an `Outcome{node, status, ran}` for each planned node. `ran` holds the exit code and the last 4096 octets of stdout and stderr, or why the command did not start. Breaking: `build` returned `Entry<String>`.
 - `text` 0.2.0.0: `lines` keeps each line's `"\n"`, so a missing final newline survives a line diff, and `unified` prints `\ No newline at end of file` as `diff -u` does. Breaking: `lines("a\n")` is `["a\n"]`, not `["a"]`. Diff strips the common prefix and suffix and uses Myers' linear-space middle snake: two unrelated 10,000-line inputs take 6.9 s and 9.8 MB, down from 51.2 s and 1.21 GB. Deletes come before inserts in each run of changes. `wrap` measures each candidate line whole, which fixes a line that a space plus VS16 made one column too wide, and every line is proved to fit or to be one grapheme cluster. Wrap takes 44 ms on the bench, up from 14 ms.
 - `markdown` 0.3.9.0: image alt text writes a soft or hard line break as a space, as cmark does. `![a\nb](/u)` gave `alt="a\nb"` and now gives `alt="a b"`. No API change.

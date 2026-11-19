@@ -3,7 +3,7 @@
 Dependency plans for builds and task graphs. `plan` gives the dependency closure of the requested targets in an order where every prerequisite comes first, or says which node is missing or which cycle blocks the plan. `invalidate` finds what an input change makes stale, and `exec` decides which nodes run, which are reused, and which are skipped. `build` runs real commands on top of them. `LAWS.bend` states these properties for every graph, and `PROOF.bend` proves them.
 
 ```bend
-import bend-kit-planner@0.2.0.0/planner.bend as P
+import bend-kit-planner@0.3.0.0/planner.bend as P
 ```
 
 It imports `bend-kit-bytes@0.3.3.0`, `bend-kit-hash@0.3.0.4`, `bend-kit-files@0.3.1.0`, and `bend-kit-process@0.5.0.1`.
@@ -14,7 +14,7 @@ Build `app` from `lib`. A second build reuses both; a change to `lib.c` rebuilds
 
 ```bend
 import Base
-import bend-kit-planner@0.2.0.0/planner.bend as P
+import bend-kit-planner@0.3.0.0/planner.bend as P
 
 def tasks() -> List<&2, P.Task>:
   [P.Task{"app", ["lib"], ["cc", "-o", "app", "main.c", "lib.o"], ["main.c"]},
@@ -55,7 +55,7 @@ The pure core is generic. A node id has any `Data` type `K` with an equality tes
 
 **Stale nodes.** A node is stale when it changed, or when it requires a stale node. `exec` runs a stale node and reuses a node that is not stale. So a change reruns the changed node and everything downstream of it, and nothing else.
 
-`plan` builds a candidate with a depth-first walk and then checks it. The check confirms that each node is defined, comes once, and comes after all its prerequisites; that each node is a target or a prerequisite of a later node; and that each target is in the plan. A candidate that fails the check gives `Refused{}`, which is a planner bug. The laws follow from the check, so they hold for every graph.
+`plan` walks the graph depth first and then checks the result. The check confirms that each node is defined, comes once, and comes after all its prerequisites; that each node is a target or a prerequisite of a later node; and that each target is in the plan. The safety laws follow from the check, so they hold for every graph. The completeness laws prove that the walk always passes the check, so `Refused{}` never happens. A path never repeats a node, and every node on it is defined, so the walk needs one level of fuel for each node of the graph.
 
 ## API
 
@@ -103,6 +103,9 @@ The build layer fixes `K` to `String`.
 | `plan_targets`, `plan_closed` | the plan holds every target, and every prerequisite of a node it holds |
 | `plan_least` | every set that holds the targets and the prerequisites of its members holds the plan; so the plan is exactly the closure |
 | `plan_cycle`, `plan_cycle_target` | no plan holds a node of a set whose every member requires a member, such as a cycle; so a target on a cycle has no plan |
+| `plan_missing`, `plan_missing_chain` | a reported missing node is undefined, and its chain runs from a target through nodes that each require the next |
+| `plan_cycle_path` | a reported cycle is a cycle: each node requires the next, and the last is the first |
+| `plan_complete` | `plan` never gives `Refused{}`. So it fails only for a true missing node or a true cycle, and it plans every other graph |
 | `stale_changed`, `stale_dependents` | a changed node of `p` is stale, and so is every node of a plan that requires a stale node |
 | `stale_least` | every set that holds each node of `p` that changed or requires a member holds every stale node; so invalidation is minimal |
 | `exec_ready` | a node that ran or was reused had every prerequisite `Built` or `Fresh` |
@@ -111,13 +114,12 @@ The build layer fixes `K` to `String`.
 | `exec_total` | each node of `p` gets a status |
 | `exec_fresh` | a stale node is never reused |
 
-Every law takes `eq` as sound: `eq(x, y)` gives `x == y`. `String.eq` is. The `exec_` laws hold for any node list, not only a plan. The fixture laws check the same functions on a diamond, a cycle, and a missing node.
+Every law takes `eq` as sound: `eq(x, y)` gives `x == y`. The completeness laws also take it as reflexive: `eq(x, x)`. `String.eq` is both. The `exec_` laws hold for any node list, not only a plan. The fixture laws check the same functions on a diamond, a cycle, and a missing node.
 
 ## Trust boundary
 
 The proofs cover the pure core. They do not cover hashing, the disk, or the commands.
 
-- **Completeness of planning.** The laws say what a plan holds when `plan` succeeds. No law says that `plan` succeeds on every acyclic graph with no missing node; `check.bend` and the fixtures test it.
 - **Declared dependencies.** Reuse is safe only when each task declares every task whose output it reads, and lists every source file it reads in `inputs`. A read that the declarations miss is not tracked.
 - **Inputs are sources.** `build` hashes all inputs before it runs a command. List only files that no task writes; an edge to the task that writes a file covers that file.
 - **Commands.** A command that exits 0 is taken to have written its outputs. `build` does not check them, and it does not sandbox the command.

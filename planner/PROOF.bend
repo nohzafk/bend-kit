@@ -132,7 +132,7 @@ def plan_ordered(
   h: {P.plan(~K, ~eq, g, ts) == Done{p} : Result<&2, &2, P.Error<K>, List<&2, K>>}
 ) -> {P.ordered(~K, ~eq, p, g, Nil{}) == True{} : Bool}:
   and_l(P.ordered(~K, ~eq, p, g, Nil{}), Bool.and(P.needed(~K, ~eq, P.rev(K, p, Nil{}), g, ts), P.all_in(~K, ~eq, ts, p)),
-    plan_valid(~K, ~eq, g, ts, P.visit(~K, ~eq, P.fuel(K, g, List.length(&2, K, ts)), g, P.enters(K, ts, Nil{}), Nil{}, Nil{}), p, h))
+    plan_valid(~K, ~eq, g, ts, P.go(~K, ~eq, 1n+List.length(&2, P.Node<K>, g), ts, g, Nil{}, Nil{}), p, h))
 
 def plan_needed(
   ~K: Data, ~eq: K -> K -> Bool, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +p: List<&2, K>,
@@ -140,7 +140,7 @@ def plan_needed(
 ) -> {P.needed(~K, ~eq, P.rev(K, p, Nil{}), g, ts) == True{} : Bool}:
   and_l(P.needed(~K, ~eq, P.rev(K, p, Nil{}), g, ts), P.all_in(~K, ~eq, ts, p),
     and_r(P.ordered(~K, ~eq, p, g, Nil{}), Bool.and(P.needed(~K, ~eq, P.rev(K, p, Nil{}), g, ts), P.all_in(~K, ~eq, ts, p)),
-      plan_valid(~K, ~eq, g, ts, P.visit(~K, ~eq, P.fuel(K, g, List.length(&2, K, ts)), g, P.enters(K, ts, Nil{}), Nil{}, Nil{}), p, h)))
+      plan_valid(~K, ~eq, g, ts, P.go(~K, ~eq, 1n+List.length(&2, P.Node<K>, g), ts, g, Nil{}, Nil{}), p, h)))
 
 def plan_covers(
   ~K: Data, ~eq: K -> K -> Bool, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +p: List<&2, K>,
@@ -148,7 +148,7 @@ def plan_covers(
 ) -> {P.all_in(~K, ~eq, ts, p) == True{} : Bool}:
   and_r(P.needed(~K, ~eq, P.rev(K, p, Nil{}), g, ts), P.all_in(~K, ~eq, ts, p),
     and_r(P.ordered(~K, ~eq, p, g, Nil{}), Bool.and(P.needed(~K, ~eq, P.rev(K, p, Nil{}), g, ts), P.all_in(~K, ~eq, ts, p)),
-      plan_valid(~K, ~eq, g, ts, P.visit(~K, ~eq, P.fuel(K, g, List.length(&2, K, ts)), g, P.enters(K, ts, Nil{}), Nil{}, Nil{}), p, h)))
+      plan_valid(~K, ~eq, g, ts, P.go(~K, ~eq, 1n+List.length(&2, P.Node<K>, g), ts, g, Nil{}, Nil{}), p, h)))
 
 def Laws.plan_targets(K, eq, sound, g, ts, p, t, h, ht):
   +g = g
@@ -1478,6 +1478,959 @@ def fresh_go(
 def Laws.exec_fresh(K, eq, sound, p, g, stale, rs, x, hx):
   fresh_go(~K, ~eq, ~sound, p, g, stale, Nil{}, rs, x,
     h => Empty.absurd({P.member(~K, ~eq, stale, x) == False{} : Bool}, none_ne_some(P.Status, P.Fresh{}, h)))(hx)
+
+# Completeness: list lemmas
+# -------------------------
+
+def Refl(~K: Data, ~eq: K -> K -> Bool) -> Type:
+  @x: K -> {eq(x, x) == True{} : Bool}
+
+def mem_cat_r(~K: Data, ~eq: K -> K -> Bool, a: List<&2, K>, +b: List<&2, K>, +k: K, h: {P.member(~K, ~eq, b, k) == True{} : Bool}) ->
+  {P.member(~K, ~eq, P.cat(K, a, b), k) == True{} : Bool}:
+  match a:
+    case Nil{}:
+      h
+    case Con{+x, +t}:
+      mem_cons_r(~K, ~eq, x, P.cat(K, t, b), k, mem_cat_r(~K, ~eq, t, b, k, h))
+
+def mem_cat_l.if(
+  ~K: Data, ~eq: K -> K -> Bool, c: Bool, +x: K, +t: List<&2, K>, +b: List<&2, K>, +k: K,
+  hc: {eq(k, x) == c : Bool}, h: {P.member(~K, ~eq, x <> t, k) == True{} : Bool},
+  ih: {P.member(~K, ~eq, t, k) == True{} : Bool} -> {P.member(~K, ~eq, P.cat(K, t, b), k) == True{} : Bool}
+) -> {P.member(~K, ~eq, x <> P.cat(K, t, b), k) == True{} : Bool}:
+  match c:
+    case True{}:
+      mem_hit(~K, ~eq, x, P.cat(K, t, b), k, hc)
+    case False{}:
+      mem_cons_r(~K, ~eq, x, P.cat(K, t, b), k, ih(mem_tail(~K, ~eq, x, t, k, hc, h)))
+
+def mem_cat_l(~K: Data, ~eq: K -> K -> Bool, a: List<&2, K>, +b: List<&2, K>, +k: K, h: {P.member(~K, ~eq, a, k) == True{} : Bool}) ->
+  {P.member(~K, ~eq, P.cat(K, a, b), k) == True{} : Bool}:
+  match a:
+    case Nil{}:
+      Empty.absurd({P.member(~K, ~eq, b, k) == True{} : Bool}, false_ne_true(h))
+    case Con{+x, +t}:
+      mem_cat_l.if(~K, ~eq, eq(k, x), x, t, b, k, {==}, h, hm => mem_cat_l(~K, ~eq, t, b, k, hm))
+
+def mem_false_head.if(~K: Data, ~eq: K -> K -> Bool, c: Bool, +y: K, +t: List<&2, K>, +k: K,
+  hc: {eq(k, y) == c : Bool}, h: {P.member(~K, ~eq, y <> t, k) == False{} : Bool}
+) -> {c == False{} : Bool}:
+  match c:
+    case True{}:
+      Empty.absurd({True{} == False{} : Bool}, clash(P.member(~K, ~eq, y <> t, k), mem_hit(~K, ~eq, y, t, k, hc), h))
+    case False{}:
+      {==}
+
+def mem_false_head(~K: Data, ~eq: K -> K -> Bool, +y: K, +t: List<&2, K>, +k: K, h: {P.member(~K, ~eq, y <> t, k) == False{} : Bool}) ->
+  {eq(k, y) == False{} : Bool}:
+  mem_false_head.if(~K, ~eq, eq(k, y), y, t, k, {==}, h)
+
+def all_in_cons(~K: Data, ~eq: K -> K -> Bool, xs: List<&2, K>, +x: K, +s: List<&2, K>, h: {P.all_in(~K, ~eq, xs, s) == True{} : Bool}) ->
+  {P.all_in(~K, ~eq, xs, x <> s) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+y, +t}:
+      +h = h
+      and_true(P.member(~K, ~eq, x <> s, y), P.all_in(~K, ~eq, t, x <> s),
+        mem_cons_r(~K, ~eq, x, s, y, and_l(P.member(~K, ~eq, s, y), P.all_in(~K, ~eq, t, s), h)),
+        all_in_cons(~K, ~eq, t, x, s, and_r(P.member(~K, ~eq, s, y), P.all_in(~K, ~eq, t, s), h)))
+
+def all_in_self(~K: Data, ~eq: K -> K -> Bool, ~refl: Refl(~K, ~eq), xs: List<&2, K>) -> {P.all_in(~K, ~eq, xs, xs) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      and_true(P.member(~K, ~eq, x <> t, x), P.all_in(~K, ~eq, t, x <> t),
+        mem_hit(~K, ~eq, x, t, x, refl(x)), all_in_cons(~K, ~eq, t, x, t, all_in_self(~K, ~eq, ~refl, t)))
+
+def all_in_trans(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), xs: List<&2, K>, +a: List<&2, K>, +b: List<&2, K>,
+  h1: {P.all_in(~K, ~eq, xs, a) == True{} : Bool}, +h2: {P.all_in(~K, ~eq, a, b) == True{} : Bool}
+) -> {P.all_in(~K, ~eq, xs, b) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      +h1 = h1
+      and_true(P.member(~K, ~eq, b, x), P.all_in(~K, ~eq, t, b),
+        all_in_mem(~K, ~eq, ~sound, a, b, x, h2, and_l(P.member(~K, ~eq, a, x), P.all_in(~K, ~eq, t, a), h1)),
+        all_in_trans(~K, ~eq, ~sound, t, a, b, and_r(P.member(~K, ~eq, a, x), P.all_in(~K, ~eq, t, a), h1), h2))
+
+def all_in_cat_l(~K: Data, ~eq: K -> K -> Bool, ~refl: Refl(~K, ~eq), a: List<&2, K>, +b: List<&2, K>) ->
+  {P.all_in(~K, ~eq, a, P.cat(K, a, b)) == True{} : Bool}:
+  match a:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      and_true(P.member(~K, ~eq, x <> P.cat(K, t, b), x), P.all_in(~K, ~eq, t, x <> P.cat(K, t, b)),
+        mem_hit(~K, ~eq, x, P.cat(K, t, b), x, refl(x)), all_in_cons(~K, ~eq, t, x, P.cat(K, t, b), all_in_cat_l(~K, ~eq, ~refl, t, b)))
+
+def all_in_cat_r(~K: Data, ~eq: K -> K -> Bool, ~refl: Refl(~K, ~eq), a: List<&2, K>, +b: List<&2, K>) ->
+  {P.all_in(~K, ~eq, b, P.cat(K, a, b)) == True{} : Bool}:
+  match a:
+    case Nil{}:
+      all_in_self(~K, ~eq, ~refl, b)
+    case Con{+x, +t}:
+      all_in_cons(~K, ~eq, b, x, P.cat(K, t, b), all_in_cat_r(~K, ~eq, ~refl, t, b))
+
+def cat_nil(-K: Data, xs: List<&2, K>) -> {P.cat(K, xs, Nil{}) == xs : List<&2, K>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      Equal.cong(List<&2, K>, List<&2, K>, l => x <> l, P.cat(K, t, Nil{}), t, cat_nil(K, t))
+
+def cat_assoc(-K: Data, a: List<&2, K>, +b: List<&2, K>, +c: List<&2, K>) ->
+  {P.cat(K, P.cat(K, a, b), c) == P.cat(K, a, P.cat(K, b, c)) : List<&2, K>}:
+  match a:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      Equal.cong(List<&2, K>, List<&2, K>, l => x <> l, P.cat(K, P.cat(K, t, b), c), P.cat(K, t, P.cat(K, b, c)), cat_assoc(K, t, b, c))
+
+def rev_cat(-K: Data, xs: List<&2, K>, +acc: List<&2, K>) -> {P.rev(K, xs, acc) == P.cat(K, P.rev(K, xs, Nil{}), acc) : List<&2, K>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      +r = P.rev(K, t, Nil{})
+      Equal.trans(List<&2, K>, P.rev(K, t, x <> acc), P.cat(K, r, x <> acc), P.cat(K, P.rev(K, t, [x]), acc),
+        rev_cat(K, t, x <> acc),
+        Equal.trans(List<&2, K>, P.cat(K, r, x <> acc), P.cat(K, P.cat(K, r, [x]), acc), P.cat(K, P.rev(K, t, [x]), acc),
+          Equal.sym(List<&2, K>, P.cat(K, P.cat(K, r, [x]), acc), P.cat(K, r, x <> acc), cat_assoc(K, r, [x], acc)),
+          Equal.sym(List<&2, K>, P.cat(K, P.rev(K, t, [x]), acc), P.cat(K, P.cat(K, r, [x]), acc),
+            Equal.cong(List<&2, K>, List<&2, K>, l => P.cat(K, l, acc), P.rev(K, t, [x]), P.cat(K, r, [x]), rev_cat(K, t, [x])))))
+
+def rev_rev(-K: Data, xs: List<&2, K>, +acc: List<&2, K>) -> {P.rev(K, P.rev(K, xs, acc), Nil{}) == P.rev(K, acc, xs) : List<&2, K>}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      rev_rev(K, t, x <> acc)
+
+def eq_sym_false.if(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), c: Bool, +x: K, +y: K,
+  hc: {eq(y, x) == c : Bool}, h: {eq(x, y) == False{} : Bool}
+) -> {c == False{} : Bool}:
+  match c:
+    case True{}:
+      Empty.absurd({True{} == False{} : Bool}, clash(eq(x, x), refl(x), (%sound(y, x, hc) : {eq(x, _) == False{} : Bool} h)))
+    case False{}:
+      {==}
+
+def eq_sym_false(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), +x: K, +y: K, h: {eq(x, y) == False{} : Bool}) ->
+  {eq(y, x) == False{} : Bool}:
+  eq_sym_false.if(~K, ~eq, ~sound, ~refl, eq(y, x), x, y, {==}, h)
+
+# Completeness: needed
+# --------------------
+
+def needed_mono(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), r: List<&2, K>, +g: List<&2, P.Node<K>>,
+  +w: List<&2, K>, +v: List<&2, K>,
+  h: {P.needed(~K, ~eq, r, g, w) == True{} : Bool}, +hs: {P.all_in(~K, ~eq, w, v) == True{} : Bool}
+) -> {P.needed(~K, ~eq, r, g, v) == True{} : Bool}:
+  match r:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      +h = h
+      +a = P.deps.or_nil(~K, ~eq, g, x)
+      and_true(P.member(~K, ~eq, v, x), P.needed(~K, ~eq, t, g, P.cat(K, a, v)),
+        all_in_mem(~K, ~eq, ~sound, w, v, x, hs, and_l(P.member(~K, ~eq, w, x), P.needed(~K, ~eq, t, g, P.cat(K, a, w)), h)),
+        needed_mono(~K, ~eq, ~sound, ~refl, t, g, P.cat(K, a, w), P.cat(K, a, v),
+          and_r(P.member(~K, ~eq, w, x), P.needed(~K, ~eq, t, g, P.cat(K, a, w)), h),
+          all_in_cat(~K, ~eq, a, w, P.cat(K, a, v), all_in_cat_l(~K, ~eq, ~refl, a, v),
+            all_in_trans(~K, ~eq, ~sound, w, v, P.cat(K, a, v), hs, all_in_cat_r(~K, ~eq, ~refl, a, v)))))
+
+def needed_cat(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), a: List<&2, K>, +b: List<&2, K>, +g: List<&2, P.Node<K>>,
+  +w: List<&2, K>, ha: {P.needed(~K, ~eq, a, g, w) == True{} : Bool}, hb: {P.needed(~K, ~eq, b, g, w) == True{} : Bool}
+) -> {P.needed(~K, ~eq, P.cat(K, a, b), g, w) == True{} : Bool}:
+  match a:
+    case Nil{}:
+      hb
+    case Con{+x, +t}:
+      +ha = ha
+      +dx = P.deps.or_nil(~K, ~eq, g, x)
+      and_true(P.member(~K, ~eq, w, x), P.needed(~K, ~eq, P.cat(K, t, b), g, P.cat(K, dx, w)),
+        and_l(P.member(~K, ~eq, w, x), P.needed(~K, ~eq, t, g, P.cat(K, dx, w)), ha),
+        needed_cat(~K, ~eq, ~sound, ~refl, t, b, g, P.cat(K, dx, w),
+          and_r(P.member(~K, ~eq, w, x), P.needed(~K, ~eq, t, g, P.cat(K, dx, w)), ha),
+          needed_mono(~K, ~eq, ~sound, ~refl, b, g, w, P.cat(K, dx, w), hb, all_in_cat_r(~K, ~eq, ~refl, dx, w))))
+
+# Completeness: fuel
+# ------------------
+
+def add_zero(n: Nat) -> {Nat.add(n, 0n) == n : Nat}:
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      Equal.cong(Nat, Nat, m => 1n+m, Nat.add(p, 0n), p, add_zero(p))
+
+def add_succ(a: Nat, +b: Nat) -> {Nat.add(a, 1n+b) == 1n+Nat.add(a, b) : Nat}:
+  match a:
+    case 0n:
+      {==}
+    case 1n+p:
+      Equal.cong(Nat, Nat, m => 1n+m, Nat.add(p, 1n+b), 1n+Nat.add(p, b), add_succ(p, b))
+
+def le(a: Nat, b: Nat) -> Bool:
+  match a b:
+    case 0n _:
+      True{}
+    case 1n+p 0n:
+      False{}
+    case 1n+p 1n+q:
+      le(p, q)
+
+def le_succ_self(n: Nat) -> {le(1n+n, n) == False{} : Bool}:
+  match n:
+    case 0n:
+      {==}
+    case 1n+p:
+      le_succ_self(p)
+
+# g without its first node named x.
+def rm(~K: Data, ~eq: K -> K -> Bool, g: List<&2, P.Node<K>>, +x: K) -> List<&2, P.Node<K>>:
+  match g:
+    case Nil{}:
+      Nil{}
+    case Con{P.Node{+id, +ds}, +t}:
+      P.when(List<&2, P.Node<K>>, u => P.Node{id, ds} <> rm(~K, ~eq, t, x), eq(x, id), t)
+
+def Len(-K: Data, xs: List<&2, P.Node<K>>) -> Nat:
+  List.length(&2, P.Node<K>, xs)
+
+def Def(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, P.Node<K>>, +x: K) -> Bool:
+  Maybe.is_some(&2, List<&2, K>, P.deps(~K, ~eq, g, x))
+
+def deps_hit(~K: Data, ~eq: K -> K -> Bool, +id: K, +ds: List<&2, K>, +t: List<&2, P.Node<K>>, +k: K, e: {eq(k, id) == True{} : Bool}) ->
+  {P.deps(~K, ~eq, P.Node{id, ds} <> t, k) == Some{ds} : Maybe<&2, List<&2, K>>}:
+  %Equal.sym(Bool, eq(k, id), True{}, e) : {P.when(Maybe<&2, List<&2, K>>, u => P.deps(~K, ~eq, t, k), _, Some{ds}) == Some{ds} : Maybe<&2, List<&2, K>>}
+  {==}
+
+def deps_miss(~K: Data, ~eq: K -> K -> Bool, +id: K, +ds: List<&2, K>, +t: List<&2, P.Node<K>>, +k: K, e: {eq(k, id) == False{} : Bool}) ->
+  {P.deps(~K, ~eq, P.Node{id, ds} <> t, k) == P.deps(~K, ~eq, t, k) : Maybe<&2, List<&2, K>>}:
+  %Equal.sym(Bool, eq(k, id), False{}, e) : {P.when(Maybe<&2, List<&2, K>>, u => P.deps(~K, ~eq, t, k), _, Some{ds}) == P.deps(~K, ~eq, t, k) : Maybe<&2, List<&2, K>>}
+  {==}
+
+def rm_hit(~K: Data, ~eq: K -> K -> Bool, +id: K, +ds: List<&2, K>, +t: List<&2, P.Node<K>>, +x: K, e: {eq(x, id) == True{} : Bool}) ->
+  {rm(~K, ~eq, P.Node{id, ds} <> t, x) == t : List<&2, P.Node<K>>}:
+  %Equal.sym(Bool, eq(x, id), True{}, e) : {P.when(List<&2, P.Node<K>>, u => P.Node{id, ds} <> rm(~K, ~eq, t, x), _, t) == t : List<&2, P.Node<K>>}
+  {==}
+
+def rm_miss(~K: Data, ~eq: K -> K -> Bool, +id: K, +ds: List<&2, K>, +t: List<&2, P.Node<K>>, +x: K, e: {eq(x, id) == False{} : Bool}) ->
+  {rm(~K, ~eq, P.Node{id, ds} <> t, x) == P.Node{id, ds} <> rm(~K, ~eq, t, x) : List<&2, P.Node<K>>}:
+  %Equal.sym(Bool, eq(x, id), False{}, e) : {P.when(List<&2, P.Node<K>>, u => P.Node{id, ds} <> rm(~K, ~eq, t, x), _, t) == P.Node{id, ds} <> rm(~K, ~eq, t, x) : List<&2, P.Node<K>>}
+  {==}
+
+def some_move(~K: Data, ~eq: K -> K -> Bool, +a: Maybe<&2, List<&2, K>>, +b: Maybe<&2, List<&2, K>>, e: {a == b : Maybe<&2, List<&2, K>>},
+  h: {Maybe.is_some(&2, List<&2, K>, a) == True{} : Bool}
+) -> {Maybe.is_some(&2, List<&2, K>, b) == True{} : Bool}:
+  %e : {Maybe.is_some(&2, List<&2, K>, _) == True{} : Bool}
+  h
+
+def len_rm.if(
+  ~K: Data, ~eq: K -> K -> Bool, c: Bool, +id: K, +ds: List<&2, K>, +t: List<&2, P.Node<K>>, +x: K,
+  +hc: {eq(x, id) == c : Bool}, h: {Def(~K, ~eq, P.Node{id, ds} <> t, x) == True{} : Bool},
+  ih: {Def(~K, ~eq, t, x) == True{} : Bool} -> {Len(K, t) == 1n+Len(K, rm(~K, ~eq, t, x)) : Nat}
+) -> {Len(K, P.Node{id, ds} <> t) == 1n+Len(K, rm(~K, ~eq, P.Node{id, ds} <> t, x)) : Nat}:
+  match c:
+    case True{}:
+      %Equal.sym(List<&2, P.Node<K>>, rm(~K, ~eq, P.Node{id, ds} <> t, x), t, rm_hit(~K, ~eq, id, ds, t, x, hc)) : {1n+Len(K, t) == 1n+Len(K, _) : Nat}
+      {==}
+    case False{}:
+      %Equal.sym(List<&2, P.Node<K>>, rm(~K, ~eq, P.Node{id, ds} <> t, x), P.Node{id, ds} <> rm(~K, ~eq, t, x), rm_miss(~K, ~eq, id, ds, t, x, hc)) : {1n+Len(K, t) == 1n+Len(K, _) : Nat}
+      Equal.cong(Nat, Nat, m => 1n+m, Len(K, t), 1n+Len(K, rm(~K, ~eq, t, x)),
+        ih(some_move(~K, ~eq, P.deps(~K, ~eq, P.Node{id, ds} <> t, x), P.deps(~K, ~eq, t, x), deps_miss(~K, ~eq, id, ds, t, x, hc), h)))
+
+# Removing a defined node shortens g by one.
+def len_rm(~K: Data, ~eq: K -> K -> Bool, g: List<&2, P.Node<K>>, +x: K, h: {Def(~K, ~eq, g, x) == True{} : Bool}) ->
+  {Len(K, g) == 1n+Len(K, rm(~K, ~eq, g, x)) : Nat}:
+  match g:
+    case Nil{}:
+      Empty.absurd({0n == 1n : Nat}, false_ne_true(h))
+    case Con{P.Node{+id, +ds}, +t}:
+      len_rm.if(~K, ~eq, eq(x, id), id, ds, t, x, {==}, h, hm => len_rm(~K, ~eq, t, x, hm))
+
+def def_rm.hit(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), c: Bool, +id: K, +ds: List<&2, K>, +t: List<&2, P.Node<K>>, +x: K, +y: K,
+  hc: {eq(y, id) == c : Bool}, hx: {x == id : K}, hy: {Def(~K, ~eq, P.Node{id, ds} <> t, y) == True{} : Bool}, hne: {eq(y, x) == False{} : Bool}
+) -> {Def(~K, ~eq, t, y) == True{} : Bool}:
+  match c:
+    case True{}:
+      Empty.absurd({Def(~K, ~eq, t, y) == True{} : Bool},
+        clash(eq(x, x), refl(x),
+          (%Equal.trans(K, y, id, x, sound(y, id, hc), Equal.sym(K, x, id, hx)) : {eq(_, x) == False{} : Bool} hne)))
+    case False{}:
+      some_move(~K, ~eq, P.deps(~K, ~eq, P.Node{id, ds} <> t, y), P.deps(~K, ~eq, t, y), deps_miss(~K, ~eq, id, ds, t, y, hc), hy)
+
+def def_rm.miss(
+  ~K: Data, ~eq: K -> K -> Bool, c: Bool, +id: K, +ds: List<&2, K>, +t: List<&2, P.Node<K>>, +x: K, +y: K,
+  +hc: {eq(y, id) == c : Bool}, hy: {Def(~K, ~eq, P.Node{id, ds} <> t, y) == True{} : Bool},
+  ih: {Def(~K, ~eq, t, y) == True{} : Bool} -> {Def(~K, ~eq, rm(~K, ~eq, t, x), y) == True{} : Bool}
+) -> {Def(~K, ~eq, P.Node{id, ds} <> rm(~K, ~eq, t, x), y) == True{} : Bool}:
+  match c:
+    case True{}:
+      %Equal.sym(Maybe<&2, List<&2, K>>, P.deps(~K, ~eq, P.Node{id, ds} <> rm(~K, ~eq, t, x), y), Some{ds}, deps_hit(~K, ~eq, id, ds, rm(~K, ~eq, t, x), y, hc)) : {Maybe.is_some(&2, List<&2, K>, _) == True{} : Bool}
+      {==}
+    case False{}:
+      %Equal.sym(Maybe<&2, List<&2, K>>, P.deps(~K, ~eq, P.Node{id, ds} <> rm(~K, ~eq, t, x), y), P.deps(~K, ~eq, rm(~K, ~eq, t, x), y), deps_miss(~K, ~eq, id, ds, rm(~K, ~eq, t, x), y, hc)) : {Maybe.is_some(&2, List<&2, K>, _) == True{} : Bool}
+      ih(some_move(~K, ~eq, P.deps(~K, ~eq, P.Node{id, ds} <> t, y), P.deps(~K, ~eq, t, y), deps_miss(~K, ~eq, id, ds, t, y, hc), hy))
+
+def def_rm.if(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), c: Bool, +id: K, +ds: List<&2, K>, +t: List<&2, P.Node<K>>, +x: K, +y: K,
+  +hc: {eq(x, id) == c : Bool}, hy: {Def(~K, ~eq, P.Node{id, ds} <> t, y) == True{} : Bool}, hne: {eq(y, x) == False{} : Bool},
+  ih: {Def(~K, ~eq, t, y) == True{} : Bool} -> {Def(~K, ~eq, rm(~K, ~eq, t, x), y) == True{} : Bool}
+) -> {Def(~K, ~eq, rm(~K, ~eq, P.Node{id, ds} <> t, x), y) == True{} : Bool}:
+  match c:
+    case True{}:
+      %Equal.sym(List<&2, P.Node<K>>, rm(~K, ~eq, P.Node{id, ds} <> t, x), t, rm_hit(~K, ~eq, id, ds, t, x, hc)) : {Def(~K, ~eq, _, y) == True{} : Bool}
+      def_rm.hit(~K, ~eq, ~sound, ~refl, eq(y, id), id, ds, t, x, y, {==}, sound(x, id, hc), hy, hne)
+    case False{}:
+      %Equal.sym(List<&2, P.Node<K>>, rm(~K, ~eq, P.Node{id, ds} <> t, x), P.Node{id, ds} <> rm(~K, ~eq, t, x), rm_miss(~K, ~eq, id, ds, t, x, hc)) : {Def(~K, ~eq, _, y) == True{} : Bool}
+      def_rm.miss(~K, ~eq, eq(y, id), id, ds, t, x, y, {==}, hy, ih)
+
+# A defined node other than x stays defined when x is removed.
+def def_rm(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), g: List<&2, P.Node<K>>, +x: K, +y: K,
+  hy: {Def(~K, ~eq, g, y) == True{} : Bool}, +hne: {eq(y, x) == False{} : Bool}
+) -> {Def(~K, ~eq, rm(~K, ~eq, g, x), y) == True{} : Bool}:
+  match g:
+    case Nil{}:
+      Empty.absurd({False{} == True{} : Bool}, false_ne_true(hy))
+    case Con{P.Node{+id, +ds}, +t}:
+      def_rm.if(~K, ~eq, ~sound, ~refl, eq(x, id), id, ds, t, x, y, {==}, hy, hne, hm => def_rm(~K, ~eq, ~sound, ~refl, t, x, y, hm, hne))
+
+# Every node of xs is defined.
+def defd(~K: Data, ~eq: K -> K -> Bool, xs: List<&2, K>, +g: List<&2, P.Node<K>>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case Con{+x, +t}:
+      Bool.and(Def(~K, ~eq, g, x), defd(~K, ~eq, t, g))
+
+def defd_rm(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), xs: List<&2, K>, +g: List<&2, P.Node<K>>, +x: K,
+  hn: {P.member(~K, ~eq, xs, x) == False{} : Bool}, hd: {defd(~K, ~eq, xs, g) == True{} : Bool}
+) -> {defd(~K, ~eq, xs, rm(~K, ~eq, g, x)) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+y, +t}:
+      +hn = hn
+      +hd = hd
+      +hxy = mem_false_head(~K, ~eq, y, t, x, hn)
+      and_true(Def(~K, ~eq, rm(~K, ~eq, g, x), y), defd(~K, ~eq, t, rm(~K, ~eq, g, x)),
+        def_rm(~K, ~eq, ~sound, ~refl, g, x, y, and_l(Def(~K, ~eq, g, y), defd(~K, ~eq, t, g), hd), eq_sym_false(~K, ~eq, ~sound, ~refl, x, y, hxy)),
+        defd_rm(~K, ~eq, ~sound, ~refl, t, g, x, mem_tail_false(~K, ~eq, y, t, x, hxy, hn), and_r(Def(~K, ~eq, g, y), defd(~K, ~eq, t, g), hd)))
+
+# A list of distinct defined nodes is no longer than g.
+def ph(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), xs: List<&2, K>, +g: List<&2, P.Node<K>>,
+  hdist: {P.distinct(~K, ~eq, xs) == True{} : Bool}, hd: {defd(~K, ~eq, xs, g) == True{} : Bool}
+) -> {le(List.length(&2, K, xs), Len(K, g)) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +r}:
+      +hdist = hdist
+      +hd = hd
+      +hnr = not_true(P.member(~K, ~eq, r, x), and_l(Bool.not(P.member(~K, ~eq, r, x)), P.distinct(~K, ~eq, r), hdist))
+      %Equal.sym(Nat, Len(K, g), 1n+Len(K, rm(~K, ~eq, g, x)), len_rm(~K, ~eq, g, x, and_l(Def(~K, ~eq, g, x), defd(~K, ~eq, r, g), hd))) :
+        {le(1n+List.length(&2, K, r), _) == True{} : Bool}
+      ph(~K, ~eq, ~sound, ~refl, r, rm(~K, ~eq, g, x),
+        and_r(Bool.not(P.member(~K, ~eq, r, x)), P.distinct(~K, ~eq, r), hdist),
+        defd_rm(~K, ~eq, ~sound, ~refl, r, g, x, hnr, and_r(Def(~K, ~eq, g, x), defd(~K, ~eq, r, g), hd)))
+
+# Completeness: errors
+# --------------------
+
+# path, nearest first: each node is required by the next, and the farthest by a target.
+def chain(~K: Data, ~eq: K -> K -> Bool, path: List<&2, K>, +g: List<&2, P.Node<K>>, +ts: List<&2, K>) -> Bool:
+  match path:
+    case Nil{}:
+      True{}
+    case Con{+p, +rest}:
+      Bool.and(Laws.req(~K, ~eq, g, ts, List.head(&2, K, rest), p), chain(~K, ~eq, rest, g, ts))
+
+# Every node of ds is required by m.
+def reqs(~K: Data, ~eq: K -> K -> Bool, ds: List<&2, K>, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +m: Maybe<&2, K>) -> Bool:
+  match ds:
+    case Nil{}:
+      True{}
+    case Con{+d, t}:
+      Bool.and(Laws.req(~K, ~eq, g, ts, m, d), reqs(~K, ~eq, t, g, ts, m))
+
+def reqs_none(~K: Data, ~eq: K -> K -> Bool, xs: List<&2, K>, +g: List<&2, P.Node<K>>, +ts: List<&2, K>,
+  h: {P.all_in(~K, ~eq, xs, ts) == True{} : Bool}
+) -> {reqs(~K, ~eq, xs, g, ts, None{}) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      +h = h
+      and_true(P.member(~K, ~eq, ts, x), reqs(~K, ~eq, t, g, ts, None{}),
+        and_l(P.member(~K, ~eq, ts, x), P.all_in(~K, ~eq, t, ts), h),
+        reqs_none(~K, ~eq, t, g, ts, and_r(P.member(~K, ~eq, ts, x), P.all_in(~K, ~eq, t, ts), h)))
+
+def reqs_some(~K: Data, ~eq: K -> K -> Bool, xs: List<&2, K>, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +d: K,
+  h: {P.all_in(~K, ~eq, xs, P.deps.or_nil(~K, ~eq, g, d)) == True{} : Bool}
+) -> {reqs(~K, ~eq, xs, g, ts, Some{d}) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      +h = h
+      +a = P.deps.or_nil(~K, ~eq, g, d)
+      and_true(P.member(~K, ~eq, a, x), reqs(~K, ~eq, t, g, ts, Some{d}),
+        and_l(P.member(~K, ~eq, a, x), P.all_in(~K, ~eq, t, a), h),
+        reqs_some(~K, ~eq, t, g, ts, d, and_r(P.member(~K, ~eq, a, x), P.all_in(~K, ~eq, t, a), h)))
+
+def linked_rev(
+  ~K: Data, ~eq: K -> K -> Bool, path: List<&2, K>, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +acc: List<&2, K>,
+  hch: {chain(~K, ~eq, path, g, ts) == True{} : Bool},
+  hl: {Laws.linked(~K, ~eq, acc, g, ts, List.head(&2, K, path)) == True{} : Bool}
+) -> {Laws.linked(~K, ~eq, P.rev(K, path, acc), g, ts, None{}) == True{} : Bool}:
+  match path:
+    case Nil{}:
+      hl
+    case Con{+p, +rest}:
+      +hch = hch
+      +m = List.head(&2, K, rest)
+      linked_rev(~K, ~eq, rest, g, ts, p <> acc,
+        and_r(Laws.req(~K, ~eq, g, ts, m, p), chain(~K, ~eq, rest, g, ts), hch),
+        and_true(Laws.req(~K, ~eq, g, ts, m, p), Laws.linked(~K, ~eq, acc, g, ts, Some{p}),
+          and_l(Laws.req(~K, ~eq, g, ts, m, p), chain(~K, ~eq, rest, g, ts), hch), hl))
+
+def missing_true(
+  ~K: Data, ~eq: K -> K -> Bool, +path: List<&2, K>, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +d: K,
+  hch: {chain(~K, ~eq, path, g, ts) == True{} : Bool},
+  hreq: {Laws.req(~K, ~eq, g, ts, List.head(&2, K, path), d) == True{} : Bool}
+) -> {Laws.linked(~K, ~eq, P.cat(K, P.rev(K, path, Nil{}), [d]), g, ts, None{}) == True{} : Bool}:
+  %rev_cat(K, path, [d]) : {Laws.linked(~K, ~eq, _, g, ts, None{}) == True{} : Bool}
+  linked_rev(~K, ~eq, path, g, ts, [d], hch,
+    and_true(Laws.req(~K, ~eq, g, ts, List.head(&2, K, path), d), True{}, hreq, {==}))
+
+def cyc_hit(~K: Data, ~eq: K -> K -> Bool, +p: K, +rest: List<&2, K>, +k: K, +acc: List<&2, K>, e: {eq(k, p) == True{} : Bool}) ->
+  {P.cyc(~K, ~eq, p <> rest, k, acc) == p <> acc : List<&2, K>}:
+  %Equal.sym(Bool, eq(k, p), True{}, e) : {P.when(List<&2, K>, u => P.cyc(~K, ~eq, rest, k, p <> acc), _, p <> acc) == p <> acc : List<&2, K>}
+  {==}
+
+def cyc_miss(~K: Data, ~eq: K -> K -> Bool, +p: K, +rest: List<&2, K>, +k: K, +acc: List<&2, K>, e: {eq(k, p) == False{} : Bool}) ->
+  {P.cyc(~K, ~eq, p <> rest, k, acc) == P.cyc(~K, ~eq, rest, k, p <> acc) : List<&2, K>}:
+  %Equal.sym(Bool, eq(k, p), False{}, e) : {P.when(List<&2, K>, u => P.cyc(~K, ~eq, rest, k, p <> acc), _, p <> acc) == P.cyc(~K, ~eq, rest, k, p <> acc) : List<&2, K>}
+  {==}
+
+def Ends(~K: Data, ~eq: K -> K -> Bool, +xs: List<&2, K>, +d: K) -> Type:
+  @x: K -> {Laws.ends(~K, ~eq, xs, x) == eq(d, x) : Bool}
+
+def cyc_ok.if(
+  ~K: Data, ~eq: K -> K -> Bool, c: Bool, +p: K, +rest: List<&2, K>, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +d: K, +a: K, +t: List<&2, K>,
+  +hc: {eq(d, p) == c : Bool}, hm: {P.member(~K, ~eq, p <> rest, d) == True{} : Bool},
+  hch: {chain(~K, ~eq, p <> rest, g, ts) == True{} : Bool},
+  hr: {Laws.req(~K, ~eq, g, ts, Some{p}, a) == True{} : Bool},
+  hl: {Laws.linked(~K, ~eq, t, g, Nil{}, Some{a}) == True{} : Bool},
+  he: Ends(~K, ~eq, a <> t, d),
+  ih: {P.member(~K, ~eq, rest, d) == True{} : Bool} -> {chain(~K, ~eq, rest, g, ts) == True{} : Bool} ->
+    {Laws.req(~K, ~eq, g, ts, List.head(&2, K, rest), p) == True{} : Bool} ->
+    {Laws.linked(~K, ~eq, a <> t, g, Nil{}, Some{p}) == True{} : Bool} -> Ends(~K, ~eq, p <> a <> t, d) ->
+    {Laws.cycle_ok(~K, ~eq, P.cyc(~K, ~eq, rest, d, p <> a <> t), g) == True{} : Bool}
+) -> {Laws.cycle_ok(~K, ~eq, P.cyc(~K, ~eq, p <> rest, d, a <> t), g) == True{} : Bool}:
+  match c:
+    case True{}:
+      %Equal.sym(List<&2, K>, P.cyc(~K, ~eq, p <> rest, d, a <> t), p <> a <> t, cyc_hit(~K, ~eq, p, rest, d, a <> t, hc)) :
+        {Laws.cycle_ok(~K, ~eq, _, g) == True{} : Bool}
+      and_true(Laws.linked(~K, ~eq, a <> t, g, Nil{}, Some{p}), Laws.ends(~K, ~eq, a <> t, p),
+        and_true(Laws.req(~K, ~eq, g, Nil{}, Some{p}, a), Laws.linked(~K, ~eq, t, g, Nil{}, Some{a}), hr, hl),
+        Equal.trans(Bool, Laws.ends(~K, ~eq, a <> t, p), eq(d, p), True{}, he(p), hc))
+    case False{}:
+      +hch = hch
+      %Equal.sym(List<&2, K>, P.cyc(~K, ~eq, p <> rest, d, a <> t), P.cyc(~K, ~eq, rest, d, p <> a <> t), cyc_miss(~K, ~eq, p, rest, d, a <> t, hc)) :
+        {Laws.cycle_ok(~K, ~eq, _, g) == True{} : Bool}
+      ih(mem_tail(~K, ~eq, p, rest, d, hc, hm),
+        and_r(Laws.req(~K, ~eq, g, ts, List.head(&2, K, rest), p), chain(~K, ~eq, rest, g, ts), hch),
+        and_l(Laws.req(~K, ~eq, g, ts, List.head(&2, K, rest), p), chain(~K, ~eq, rest, g, ts), hch),
+        and_true(Laws.req(~K, ~eq, g, Nil{}, Some{p}, a), Laws.linked(~K, ~eq, t, g, Nil{}, Some{a}), hr, hl),
+        x => he(x))
+
+# The cycle that cyc reports: a, then t, end at d, and the path's head requires a.
+def cyc_ok(
+  ~K: Data, ~eq: K -> K -> Bool, path: List<&2, K>, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +d: K, +a: K, +t: List<&2, K>,
+  hm: {P.member(~K, ~eq, path, d) == True{} : Bool}, hch: {chain(~K, ~eq, path, g, ts) == True{} : Bool},
+  hr: {Laws.req(~K, ~eq, g, ts, List.head(&2, K, path), a) == True{} : Bool},
+  hl: {Laws.linked(~K, ~eq, t, g, Nil{}, Some{a}) == True{} : Bool}, he: Ends(~K, ~eq, a <> t, d)
+) -> {Laws.cycle_ok(~K, ~eq, P.cyc(~K, ~eq, path, d, a <> t), g) == True{} : Bool}:
+  match path:
+    case Nil{}:
+      Empty.absurd({Laws.cycle_ok(~K, ~eq, a <> t, g) == True{} : Bool}, false_ne_true(hm))
+    case Con{+p, +rest}:
+      cyc_ok.if(~K, ~eq, eq(d, p), p, rest, g, ts, d, a, t, {==}, hm, hch, hr, hl, he,
+        h1 => h2 => h3 => h4 => h5 => cyc_ok(~K, ~eq, rest, g, ts, d, p, a <> t, h1, h2, h3, h4, h5))
+
+def cycle_true(
+  ~K: Data, ~eq: K -> K -> Bool, +path: List<&2, K>, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +d: K,
+  hm: {P.member(~K, ~eq, path, d) == True{} : Bool}, hch: {chain(~K, ~eq, path, g, ts) == True{} : Bool},
+  hreq: {Laws.req(~K, ~eq, g, ts, List.head(&2, K, path), d) == True{} : Bool}
+) -> {Laws.cycle_ok(~K, ~eq, P.cyc(~K, ~eq, path, d, [d]), g) == True{} : Bool}:
+  cyc_ok(~K, ~eq, path, g, ts, d, d, Nil{}, hm, hch, hreq, {==}, x => {==})
+
+# Completeness: the walk
+# ----------------------
+
+# xs, latest first: each node is new, defined, and has its prerequisites after it.
+def ordr(~K: Data, ~eq: K -> K -> Bool, xs: List<&2, K>, +g: List<&2, P.Node<K>>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case Con{+x, +t}:
+      Bool.and(Bool.not(P.member(~K, ~eq, t, x)), Bool.and(P.ordered.node(~K, ~eq, P.deps(~K, ~eq, g, x), t), ordr(~K, ~eq, t, g)))
+
+def Pre(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +fuel: Nat, +ds: List<&2, K>, +path: List<&2, K>, +done: List<&2, K>) -> Type:
+  {ordr(~K, ~eq, done, g) == True{} : Bool}
+  & ({disj(~K, ~eq, done, path) == True{} : Bool}
+  & ({chain(~K, ~eq, path, g, ts) == True{} : Bool}
+  & ({reqs(~K, ~eq, ds, g, ts, List.head(&2, K, path)) == True{} : Bool}
+  & ({P.distinct(~K, ~eq, path) == True{} : Bool}
+  & ({defd(~K, ~eq, path, g) == True{} : Bool}
+  & {Nat.add(List.length(&2, K, path), fuel) == 1n+Len(K, g) : Nat})))))
+
+def Seg(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, P.Node<K>>, +ds: List<&2, K>, +done: List<&2, K>, +x: List<&2, K>) -> Type:
+  &seg: List<&2, K> -> ({x == P.cat(K, seg, done) : List<&2, K>} & {P.needed(~K, ~eq, seg, g, ds) == True{} : Bool})
+
+def Post(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, P.Node<K>>, +ds: List<&2, K>, +path: List<&2, K>, +done: List<&2, K>, +x: List<&2, K>) -> Type:
+  {P.all_in(~K, ~eq, ds, x) == True{} : Bool}
+  & ({ordr(~K, ~eq, x, g) == True{} : Bool}
+  & ({disj(~K, ~eq, x, path) == True{} : Bool}
+  & Seg(~K, ~eq, g, ds, done, x)))
+
+def Bad(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, e: P.Error<K>) -> Type:
+  match e:
+    case P.Missing{n, c}:
+      {P.deps(~K, ~eq, g, n) == None{} : Maybe<&2, List<&2, K>>} & {Laws.linked(~K, ~eq, P.cat(K, c, [n]), g, ts, None{}) == True{} : Bool}
+    case P.Cycle{c}:
+      {Laws.cycle_ok(~K, ~eq, c, g) == True{} : Bool}
+    case P.Refused{}:
+      Empty
+
+def Good(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +ds: List<&2, K>, +path: List<&2, K>, +done: List<&2, K>,
+  r: Result<&2, &2, P.Error<K>, List<&2, K>>
+) -> Type:
+  match r:
+    case Fail{e}:
+      Bad(~K, ~eq, g, ts, e)
+    case Done{x}:
+      Post(~K, ~eq, g, ds, path, done, x)
+
+def disj_cons.if(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), c: Bool, +z: K, +t: List<&2, K>, +d: K, +path: List<&2, K>,
+  +hc: {eq(z, d) == c : Bool}, hnd: {P.member(~K, ~eq, z <> t, d) == False{} : Bool},
+  hz: {P.member(~K, ~eq, path, z) == False{} : Bool},
+  ih: {P.member(~K, ~eq, t, d) == False{} : Bool} -> {disj(~K, ~eq, t, d <> path) == True{} : Bool}
+) -> {disj(~K, ~eq, z <> t, d <> path) == True{} : Bool}:
+  match c:
+    case True{}:
+      Empty.absurd({disj(~K, ~eq, z <> t, d <> path) == True{} : Bool},
+        clash(P.member(~K, ~eq, z <> t, d),
+          mem_hit(~K, ~eq, z, t, d, (%Equal.sym(K, z, d, sound(z, d, hc)) : {eq(d, _) == True{} : Bool} refl(d))), hnd))
+    case False{}:
+      +hdz = eq_sym_false(~K, ~eq, ~sound, ~refl, z, d, hc)
+      and_not_false(P.member(~K, ~eq, d <> path, z), disj(~K, ~eq, t, d <> path),
+        mem_cons_false(~K, ~eq, d, path, z, hc, hz), ih(mem_tail_false(~K, ~eq, z, t, d, hdz, hnd)))
+
+def disj_cons(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), done: List<&2, K>, +d: K, +path: List<&2, K>,
+  hnd: {P.member(~K, ~eq, done, d) == False{} : Bool}, hdis: {disj(~K, ~eq, done, path) == True{} : Bool}
+) -> {disj(~K, ~eq, done, d <> path) == True{} : Bool}:
+  match done:
+    case Nil{}:
+      {==}
+    case Con{+z, +t}:
+      +hdis = hdis
+      disj_cons.if(~K, ~eq, ~sound, ~refl, eq(z, d), z, t, d, path, {==}, hnd,
+        not_true(P.member(~K, ~eq, path, z), and_l(Bool.not(P.member(~K, ~eq, path, z)), disj(~K, ~eq, t, path), hdis)),
+        h => disj_cons(~K, ~eq, ~sound, ~refl, t, d, path, h, and_r(Bool.not(P.member(~K, ~eq, path, z)), disj(~K, ~eq, t, path), hdis)))
+
+def disj_drop.if(~K: Data, ~eq: K -> K -> Bool, c: Bool, +z: K, +d: K, +path: List<&2, K>,
+  hc: {eq(z, d) == c : Bool}, h: {P.member(~K, ~eq, d <> path, z) == False{} : Bool}
+) -> {P.member(~K, ~eq, path, z) == False{} : Bool}:
+  match c:
+    case True{}:
+      Empty.absurd({P.member(~K, ~eq, path, z) == False{} : Bool}, clash(P.member(~K, ~eq, d <> path, z), mem_hit(~K, ~eq, d, path, z, hc), h))
+    case False{}:
+      mem_tail_false(~K, ~eq, d, path, z, hc, h)
+
+def disj_drop(~K: Data, ~eq: K -> K -> Bool, xs: List<&2, K>, +d: K, +path: List<&2, K>,
+  h: {disj(~K, ~eq, xs, d <> path) == True{} : Bool}
+) -> {disj(~K, ~eq, xs, path) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+z, +t}:
+      +h = h
+      +c = {d <> path : List<&2, K>}
+      and_not_false(P.member(~K, ~eq, path, z), disj(~K, ~eq, t, path),
+        disj_drop.if(~K, ~eq, eq(z, d), z, d, path, {==}, not_true(P.member(~K, ~eq, c, z), and_l(Bool.not(P.member(~K, ~eq, c, z)), disj(~K, ~eq, t, c), h))),
+        disj_drop(~K, ~eq, t, d, path, and_r(Bool.not(P.member(~K, ~eq, c, z)), disj(~K, ~eq, t, c), h)))
+
+def not_in.if(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), b: Bool, +x: List<&2, K>, +c: List<&2, K>, +d: K,
+  hb: {P.member(~K, ~eq, x, d) == b : Bool}, hd: {disj(~K, ~eq, x, c) == True{} : Bool}, hin: {P.member(~K, ~eq, c, d) == True{} : Bool}
+) -> {b == False{} : Bool}:
+  match b:
+    case True{}:
+      Empty.absurd({True{} == False{} : Bool}, clash(P.member(~K, ~eq, c, d), hin, disj_mem(~K, ~eq, ~sound, x, c, d, hd, hb)))
+    case False{}:
+      {==}
+
+# A node of c is not in a list that misses c.
+def not_in(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), +x: List<&2, K>, +c: List<&2, K>, +d: K,
+  hd: {disj(~K, ~eq, x, c) == True{} : Bool}, hin: {P.member(~K, ~eq, c, d) == True{} : Bool}
+) -> {P.member(~K, ~eq, x, d) == False{} : Bool}:
+  not_in.if(~K, ~eq, ~sound, P.member(~K, ~eq, x, d), x, c, d, {==}, hd, hin)
+
+def node_of(~K: Data, ~eq: K -> K -> Bool, +g: List<&2, P.Node<K>>, +d: K, +dd: List<&2, K>, +x: List<&2, K>,
+  hm: {P.deps(~K, ~eq, g, d) == Some{dd} : Maybe<&2, List<&2, K>>}, h: {P.all_in(~K, ~eq, dd, x) == True{} : Bool}
+) -> {P.ordered.node(~K, ~eq, P.deps(~K, ~eq, g, d), x) == True{} : Bool}:
+  %Equal.sym(Maybe<&2, List<&2, K>>, P.deps(~K, ~eq, g, d), Some{dd}, hm) : {P.ordered.node(~K, ~eq, _, x) == True{} : Bool}
+  h
+
+def widen_skip(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), r: Result<&2, &2, P.Error<K>, List<&2, K>>,
+  +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +d: K, +rest: List<&2, K>, +path: List<&2, K>, +done: List<&2, K>,
+  hg: Good(~K, ~eq, g, ts, rest, path, done, r), hin: {P.member(~K, ~eq, done, d) == True{} : Bool}
+) -> Good(~K, ~eq, g, ts, d <> rest, path, done, r):
+  match r:
+    case Fail{e}:
+      hg
+    case Done{+y}:
+      (ha, r1) = hg
+      (hb, r2) = r1
+      (hd, hs) = r2
+      (+seg, r3) = hs
+      (+hy, hn) = r3
+      (and_true(P.member(~K, ~eq, y, d), P.all_in(~K, ~eq, rest, y),
+         (%Equal.sym(List<&2, K>, y, P.cat(K, seg, done), hy) : {P.member(~K, ~eq, _, d) == True{} : Bool}
+          mem_cat_r(~K, ~eq, seg, done, d, hin)), ha),
+       (hb, (hd, (seg, (hy, needed_mono(~K, ~eq, ~sound, ~refl, seg, g, rest, d <> rest, hn, all_in_cons(~K, ~eq, rest, d, rest, all_in_self(~K, ~eq, ~refl, rest))))))))
+
+def widen_new(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), r: Result<&2, &2, P.Error<K>, List<&2, K>>,
+  +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +d: K, +rest: List<&2, K>, +path: List<&2, K>, +done: List<&2, K>,
+  +x: List<&2, K>, +seg1: List<&2, K>, +dd: List<&2, K>,
+  hg: Good(~K, ~eq, g, ts, rest, path, d <> x, r), hx: {x == P.cat(K, seg1, done) : List<&2, K>},
+  hn1: {P.needed(~K, ~eq, seg1, g, dd) == True{} : Bool}, hdn: {P.deps.or_nil(~K, ~eq, g, d) == dd : List<&2, K>}
+) -> Good(~K, ~eq, g, ts, d <> rest, path, done, r):
+  match r:
+    case Fail{e}:
+      hg
+    case Done{+y}:
+      (ha, r1) = hg
+      (hb, r2) = r1
+      (hd, hs) = r2
+      (+seg2, r3) = hs
+      (+hy, hn2) = r3
+      +seg = P.cat(K, seg2, d <> seg1)
+      +a = P.deps.or_nil(~K, ~eq, g, d)
+      +w = {d <> rest : List<&2, K>}
+      (and_true(P.member(~K, ~eq, y, d), P.all_in(~K, ~eq, rest, y),
+         (%Equal.sym(List<&2, K>, y, P.cat(K, seg2, d <> x), hy) : {P.member(~K, ~eq, _, d) == True{} : Bool}
+          mem_cat_r(~K, ~eq, seg2, d <> x, d, mem_hit(~K, ~eq, d, x, d, refl(d)))), ha),
+       (hb, (hd, (seg,
+         (Equal.trans(List<&2, K>, y, P.cat(K, seg2, d <> x), P.cat(K, seg, done), hy,
+            Equal.trans(List<&2, K>, P.cat(K, seg2, d <> x), P.cat(K, seg2, d <> P.cat(K, seg1, done)), P.cat(K, seg, done),
+              Equal.cong(List<&2, K>, List<&2, K>, l => P.cat(K, seg2, d <> l), x, P.cat(K, seg1, done), hx),
+              Equal.sym(List<&2, K>, P.cat(K, seg, done), P.cat(K, seg2, d <> P.cat(K, seg1, done)), cat_assoc(K, seg2, d <> seg1, done)))),
+          needed_cat(~K, ~eq, ~sound, ~refl, seg2, d <> seg1, g, w,
+            needed_mono(~K, ~eq, ~sound, ~refl, seg2, g, rest, w, hn2, all_in_cons(~K, ~eq, rest, d, rest, all_in_self(~K, ~eq, ~refl, rest))),
+            and_true(P.member(~K, ~eq, w, d), P.needed(~K, ~eq, seg1, g, P.cat(K, a, w)), mem_hit(~K, ~eq, d, rest, d, refl(d)),
+              needed_mono(~K, ~eq, ~sound, ~refl, seg1, g, dd, P.cat(K, a, w), hn1,
+                (%Equal.sym(List<&2, K>, a, dd, hdn) : {P.all_in(~K, ~eq, dd, P.cat(K, _, w)) == True{} : Bool}
+                 all_in_cat_l(~K, ~eq, ~refl, dd, w))))))))))
+
+def good.then(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), rc: Result<&2, &2, P.Error<K>, List<&2, K>>,
+  +f: Nat, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +d: K, +rest: List<&2, K>, +path: List<&2, K>, +done: List<&2, K>, +dd: List<&2, K>,
+  hgc: Good(~K, ~eq, g, ts, dd, d <> path, done, rc),
+  +hm: {P.deps(~K, ~eq, g, d) == Some{dd} : Maybe<&2, List<&2, K>>}, +hopen: {P.member(~K, ~eq, path, d) == False{} : Bool},
+  hch: {chain(~K, ~eq, path, g, ts) == True{} : Bool},
+  hreqs: {reqs(~K, ~eq, rest, g, ts, List.head(&2, K, path)) == True{} : Bool},
+  hdist: {P.distinct(~K, ~eq, path) == True{} : Bool}, hdef: {defd(~K, ~eq, path, g) == True{} : Bool},
+  hfuel: {Nat.add(List.length(&2, K, path), 1n+f) == 1n+Len(K, g) : Nat},
+  ih: @x: List<&2, K> -> Pre(~K, ~eq, g, ts, 1n+f, rest, path, d <> x) ->
+    Good(~K, ~eq, g, ts, rest, path, d <> x, P.go(~K, ~eq, 1n+f, rest, g, path, d <> x))
+) -> Good(~K, ~eq, g, ts, d <> rest, path, done, P.go.then(K, rc, r => P.go(~K, ~eq, 1n+f, rest, g, path, d <> r))):
+  match rc:
+    case Fail{e}:
+      hgc
+    case Done{+x}:
+      (ha, r1) = hgc
+      (hb, r2) = r1
+      (+hd, hs) = r2
+      (+seg1, r3) = hs
+      (hx, hn) = r3
+      +node = P.ordered.node(~K, ~eq, P.deps(~K, ~eq, g, d), x)
+      widen_new(~K, ~eq, ~sound, ~refl, P.go(~K, ~eq, 1n+f, rest, g, path, d <> x), g, ts, d, rest, path, done, x, seg1, dd,
+        ih(x,
+          (and_not_false(P.member(~K, ~eq, x, d), Bool.and(node, ordr(~K, ~eq, x, g)),
+             not_in(~K, ~eq, ~sound, x, d <> path, d, hd, mem_hit(~K, ~eq, d, path, d, refl(d))),
+             and_true(node, ordr(~K, ~eq, x, g), node_of(~K, ~eq, g, d, dd, x, hm, ha), hb)),
+           (and_not_false(P.member(~K, ~eq, path, d), disj(~K, ~eq, x, path), hopen, disj_drop(~K, ~eq, x, d, path, hd)),
+            (hch, (hreqs, (hdist, (hdef, hfuel))))))),
+        hx, hn, or_nil_some(~K, ~eq, g, d, dd, hm))
+
+def good.node(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), m: Maybe<&2, List<&2, K>>,
+  +f: Nat, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +d: K, +rest: List<&2, K>, +path: List<&2, K>, +done: List<&2, K>,
+  +hm: {P.deps(~K, ~eq, g, d) == m : Maybe<&2, List<&2, K>>},
+  +hnd: {P.member(~K, ~eq, done, d) == False{} : Bool}, +hopen: {P.member(~K, ~eq, path, d) == False{} : Bool},
+  +hord: {ordr(~K, ~eq, done, g) == True{} : Bool}, +hdis: {disj(~K, ~eq, done, path) == True{} : Bool},
+  +hch: {chain(~K, ~eq, path, g, ts) == True{} : Bool},
+  +hreq: {Laws.req(~K, ~eq, g, ts, List.head(&2, K, path), d) == True{} : Bool},
+  +hreqs: {reqs(~K, ~eq, rest, g, ts, List.head(&2, K, path)) == True{} : Bool},
+  +hdist: {P.distinct(~K, ~eq, path) == True{} : Bool}, +hdef: {defd(~K, ~eq, path, g) == True{} : Bool},
+  +hfuel: {Nat.add(List.length(&2, K, path), 1n+f) == 1n+Len(K, g) : Nat},
+  ihc: @dd: List<&2, K> -> Pre(~K, ~eq, g, ts, f, dd, d <> path, done) ->
+    Good(~K, ~eq, g, ts, dd, d <> path, done, P.go(~K, ~eq, f, dd, g, d <> path, done)),
+  ihr: @x: List<&2, K> -> Pre(~K, ~eq, g, ts, 1n+f, rest, path, d <> x) ->
+    Good(~K, ~eq, g, ts, rest, path, d <> x, P.go(~K, ~eq, 1n+f, rest, g, path, d <> x))
+) -> Good(~K, ~eq, g, ts, d <> rest, path, done,
+    P.go.node(K, Result<&2, &2, P.Error<K>, List<&2, K>>, m,
+      u => Fail{P.Missing{d, P.rev(K, path, Nil{})}},
+      dd => P.go.then(K, P.go(~K, ~eq, f, dd, g, d <> path, done), r => P.go(~K, ~eq, 1n+f, rest, g, path, d <> r)))):
+  match m:
+    case None{}:
+      (hm, missing_true(~K, ~eq, path, g, ts, d, hch, hreq))
+    case Some{+dd}:
+      +hsm = Equal.sym(Maybe<&2, List<&2, K>>, P.deps(~K, ~eq, g, d), Some{dd}, hm)
+      good.then(~K, ~eq, ~sound, ~refl, P.go(~K, ~eq, f, dd, g, d <> path, done), f, g, ts, d, rest, path, done, dd,
+        ihc(dd,
+          (hord,
+           (disj_cons(~K, ~eq, ~sound, ~refl, done, d, path, hnd, hdis),
+            (and_true(Laws.req(~K, ~eq, g, ts, List.head(&2, K, path), d), chain(~K, ~eq, path, g, ts), hreq, hch),
+             (reqs_some(~K, ~eq, dd, g, ts, d,
+                (%Equal.sym(List<&2, K>, P.deps.or_nil(~K, ~eq, g, d), dd, or_nil_some(~K, ~eq, g, d, dd, hm)) : {P.all_in(~K, ~eq, dd, _) == True{} : Bool}
+                 all_in_self(~K, ~eq, ~refl, dd))),
+              (and_not_false(P.member(~K, ~eq, path, d), P.distinct(~K, ~eq, path), hopen, hdist),
+               (and_true(Def(~K, ~eq, g, d), defd(~K, ~eq, path, g), some_move(~K, ~eq, Some{dd}, P.deps(~K, ~eq, g, d), hsm, {==}), hdef),
+                Equal.trans(Nat, 1n+Nat.add(List.length(&2, K, path), f), Nat.add(List.length(&2, K, path), 1n+f), 1n+Len(K, g),
+                  Equal.sym(Nat, Nat.add(List.length(&2, K, path), 1n+f), 1n+Nat.add(List.length(&2, K, path), f), add_succ(List.length(&2, K, path), f)),
+                  hfuel)))))))),
+        hm, hopen, hch, hreqs, hdist, hdef, hfuel, ihr)
+
+def good.open(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), open: Bool,
+  +f: Nat, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +d: K, +rest: List<&2, K>, +path: List<&2, K>, +done: List<&2, K>,
+  +hopen: {P.member(~K, ~eq, path, d) == open : Bool},
+  +hnd: {P.member(~K, ~eq, done, d) == False{} : Bool},
+  +hord: {ordr(~K, ~eq, done, g) == True{} : Bool}, +hdis: {disj(~K, ~eq, done, path) == True{} : Bool},
+  +hch: {chain(~K, ~eq, path, g, ts) == True{} : Bool},
+  +hreq: {Laws.req(~K, ~eq, g, ts, List.head(&2, K, path), d) == True{} : Bool},
+  +hreqs: {reqs(~K, ~eq, rest, g, ts, List.head(&2, K, path)) == True{} : Bool},
+  +hdist: {P.distinct(~K, ~eq, path) == True{} : Bool}, +hdef: {defd(~K, ~eq, path, g) == True{} : Bool},
+  +hfuel: {Nat.add(List.length(&2, K, path), 1n+f) == 1n+Len(K, g) : Nat},
+  ihc: @dd: List<&2, K> -> Pre(~K, ~eq, g, ts, f, dd, d <> path, done) ->
+    Good(~K, ~eq, g, ts, dd, d <> path, done, P.go(~K, ~eq, f, dd, g, d <> path, done)),
+  ihr: @x: List<&2, K> -> Pre(~K, ~eq, g, ts, 1n+f, rest, path, d <> x) ->
+    Good(~K, ~eq, g, ts, rest, path, d <> x, P.go(~K, ~eq, 1n+f, rest, g, path, d <> x))
+) -> Good(~K, ~eq, g, ts, d <> rest, path, done,
+    P.go.open(K, Result<&2, &2, P.Error<K>, List<&2, K>>, open, u => P.deps(~K, ~eq, g, d),
+      u => Fail{P.cycle(~K, ~eq, path, d)},
+      u => Fail{P.Missing{d, P.rev(K, path, Nil{})}},
+      dd => P.go.then(K, P.go(~K, ~eq, f, dd, g, d <> path, done), r => P.go(~K, ~eq, 1n+f, rest, g, path, d <> r)))):
+  match open:
+    case True{}:
+      cycle_true(~K, ~eq, path, g, ts, d, hopen, hch, hreq)
+    case False{}:
+      good.node(~K, ~eq, ~sound, ~refl, P.deps(~K, ~eq, g, d), f, g, ts, d, rest, path, done, {==}, hnd, hopen,
+        hord, hdis, hch, hreq, hreqs, hdist, hdef, hfuel, ihc, ihr)
+
+def good.at(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), seen: Bool,
+  +f: Nat, +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +d: K, +rest: List<&2, K>, +path: List<&2, K>, +done: List<&2, K>,
+  +hseen: {P.member(~K, ~eq, done, d) == seen : Bool},
+  +hord: {ordr(~K, ~eq, done, g) == True{} : Bool}, +hdis: {disj(~K, ~eq, done, path) == True{} : Bool},
+  +hch: {chain(~K, ~eq, path, g, ts) == True{} : Bool},
+  +hreq: {Laws.req(~K, ~eq, g, ts, List.head(&2, K, path), d) == True{} : Bool},
+  +hreqs: {reqs(~K, ~eq, rest, g, ts, List.head(&2, K, path)) == True{} : Bool},
+  +hdist: {P.distinct(~K, ~eq, path) == True{} : Bool}, +hdef: {defd(~K, ~eq, path, g) == True{} : Bool},
+  +hfuel: {Nat.add(List.length(&2, K, path), 1n+f) == 1n+Len(K, g) : Nat},
+  ihs: Good(~K, ~eq, g, ts, rest, path, done, P.go(~K, ~eq, 1n+f, rest, g, path, done)),
+  ihc: @dd: List<&2, K> -> Pre(~K, ~eq, g, ts, f, dd, d <> path, done) ->
+    Good(~K, ~eq, g, ts, dd, d <> path, done, P.go(~K, ~eq, f, dd, g, d <> path, done)),
+  ihr: @x: List<&2, K> -> Pre(~K, ~eq, g, ts, 1n+f, rest, path, d <> x) ->
+    Good(~K, ~eq, g, ts, rest, path, d <> x, P.go(~K, ~eq, 1n+f, rest, g, path, d <> x))
+) -> Good(~K, ~eq, g, ts, d <> rest, path, done,
+    P.go.at(K, Result<&2, &2, P.Error<K>, List<&2, K>>, seen, u => P.member(~K, ~eq, path, d), u => P.deps(~K, ~eq, g, d),
+      u => P.go(~K, ~eq, 1n+f, rest, g, path, done),
+      u => Fail{P.cycle(~K, ~eq, path, d)},
+      u => Fail{P.Missing{d, P.rev(K, path, Nil{})}},
+      dd => P.go.then(K, P.go(~K, ~eq, f, dd, g, d <> path, done), r => P.go(~K, ~eq, 1n+f, rest, g, path, d <> r)))):
+  match seen:
+    case True{}:
+      widen_skip(~K, ~eq, ~sound, ~refl, P.go(~K, ~eq, 1n+f, rest, g, path, done), g, ts, d, rest, path, done, ihs, hseen)
+    case False{}:
+      good.open(~K, ~eq, ~sound, ~refl, P.member(~K, ~eq, path, d), f, g, ts, d, rest, path, done, {==}, hseen,
+        hord, hdis, hch, hreq, hreqs, hdist, hdef, hfuel, ihc, ihr)
+
+# The walk ends in a true error, or in a dependency order of exactly the closure of ds.
+def good(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), fuel: Nat, ds: List<&2, K>,
+  +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +path: List<&2, K>, +done: List<&2, K>,
+  pre: Pre(~K, ~eq, g, ts, fuel, ds, path, done)
+) -> Good(~K, ~eq, g, ts, ds, path, done, P.go(~K, ~eq, fuel, ds, g, path, done)):
+  match fuel:
+    case 0n:
+      (hord, p1) = pre
+      (hdis, p2) = p1
+      (hch, p3) = p2
+      (hreqs, p4) = p3
+      (hdist, p5) = p4
+      (hdef, hfuel) = p5
+      +n = List.length(&2, K, path)
+      Empty.absurd(Good(~K, ~eq, g, ts, ds, path, done, P.go.out(K, ds, done)),
+        clash(le(1n+Len(K, g), Len(K, g)),
+          (%Equal.trans(Nat, n, Nat.add(n, 0n), 1n+Len(K, g), Equal.sym(Nat, Nat.add(n, 0n), n, add_zero(n)), hfuel) :
+             {le(_, Len(K, g)) == True{} : Bool}
+           ph(~K, ~eq, ~sound, ~refl, path, g, hdist, hdef)),
+          le_succ_self(Len(K, g))))
+    case 1n+(+f):
+      match ds:
+        case Nil{}:
+          (hord, p1) = pre
+          (hdis, p2) = p1
+          +hord = hord
+          +hdis = hdis
+          ({==}, (hord, (hdis, (Nil{}, ({==}, {==})))))
+        case Con{+d, +rest}:
+          (hord, p1) = pre
+          (hdis, p2) = p1
+          (hch, p3) = p2
+          (hreqs, p4) = p3
+          (hdist, p5) = p4
+          (hdef, hfuel) = p5
+          +hord = hord
+          +hdis = hdis
+          +hch = hch
+          +hreqs = hreqs
+          +hdist = hdist
+          +hdef = hdef
+          +hfuel = {hfuel : {Nat.add(List.length(&2, K, path), 1n+f) == 1n+Len(K, g) : Nat}}
+          +m = List.head(&2, K, path)
+          +hreq = and_l(Laws.req(~K, ~eq, g, ts, m, d), reqs(~K, ~eq, rest, g, ts, m), hreqs)
+          +hrest = and_r(Laws.req(~K, ~eq, g, ts, m, d), reqs(~K, ~eq, rest, g, ts, m), hreqs)
+          good.at(~K, ~eq, ~sound, ~refl, P.member(~K, ~eq, done, d), f, g, ts, d, rest, path, done, {==},
+            hord, hdis, hch, hreq, hrest, hdist, hdef, hfuel,
+            good(~K, ~eq, ~sound, ~refl, 1n+f, rest, g, ts, path, done, {(hord, (hdis, (hch, (hrest, (hdist, (hdef, hfuel)))))) : Pre(~K, ~eq, g, ts, 1n+f, rest, path, done)}),
+            dd => pc => good(~K, ~eq, ~sound, ~refl, f, dd, g, ts, d <> path, done, pc),
+            x => pr => good(~K, ~eq, ~sound, ~refl, 1n+f, rest, g, ts, path, d <> x, pr))
+
+def plan_good(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), +g: List<&2, P.Node<K>>, +ts: List<&2, K>) ->
+  Good(~K, ~eq, g, ts, ts, Nil{}, Nil{}, P.go(~K, ~eq, 1n+Len(K, g), ts, g, Nil{}, Nil{})):
+  good(~K, ~eq, ~sound, ~refl, 1n+Len(K, g), ts, g, ts, Nil{}, Nil{},
+    ({==}, ({==}, ({==}, (reqs_none(~K, ~eq, ts, g, ts, all_in_self(~K, ~eq, ~refl, ts)), ({==}, ({==}, {==})))))))
+
+def ord_rev(~K: Data, ~eq: K -> K -> Bool, xs: List<&2, K>, +g: List<&2, P.Node<K>>, +acc: List<&2, K>,
+  h: {ordr(~K, ~eq, xs, g) == True{} : Bool}, ho: {P.ordered(~K, ~eq, acc, g, xs) == True{} : Bool}
+) -> {P.ordered(~K, ~eq, P.rev(K, xs, acc), g, Nil{}) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      ho
+    case Con{+x, +t}:
+      +h = h
+      +node = P.ordered.node(~K, ~eq, P.deps(~K, ~eq, g, x), t)
+      +nt = Bool.not(P.member(~K, ~eq, t, x))
+      ord_rev(~K, ~eq, t, g, x <> acc,
+        and_r(node, ordr(~K, ~eq, t, g), and_r(nt, Bool.and(node, ordr(~K, ~eq, t, g)), h)),
+        and_true(nt, Bool.and(node, P.ordered(~K, ~eq, acc, g, x <> t)),
+          and_l(nt, Bool.and(node, ordr(~K, ~eq, t, g)), h),
+          and_true(node, P.ordered(~K, ~eq, acc, g, x <> t), and_l(node, ordr(~K, ~eq, t, g), and_r(nt, Bool.and(node, ordr(~K, ~eq, t, g)), h)), ho)))
+
+def all_in_rev(~K: Data, ~eq: K -> K -> Bool, ~refl: Refl(~K, ~eq), xs: List<&2, K>, +acc: List<&2, K>) ->
+  {P.all_in(~K, ~eq, xs, P.rev(K, xs, acc)) == True{} : Bool}:
+  match xs:
+    case Nil{}:
+      {==}
+    case Con{+x, +t}:
+      and_true(P.member(~K, ~eq, P.rev(K, t, x <> acc), x), P.all_in(~K, ~eq, t, P.rev(K, t, x <> acc)),
+        rev_mem_r(~K, ~eq, t, x <> acc, x, mem_hit(~K, ~eq, x, acc, x, refl(x))), all_in_rev(~K, ~eq, ~refl, t, x <> acc))
+
+def valid_of_post(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +x: List<&2, K>,
+  post: Post(~K, ~eq, g, ts, Nil{}, Nil{}, x)
+) -> {P.valid(~K, ~eq, g, ts, P.rev(K, x, Nil{})) == True{} : Bool}:
+  (ha, r1) = post
+  (hb, r2) = r1
+  (hd, hs) = r2
+  (+seg, r3) = hs
+  (hx, hn) = r3
+  +p = P.rev(K, x, Nil{})
+  +rr = P.rev(K, p, Nil{})
+  and_true(P.ordered(~K, ~eq, p, g, Nil{}), Bool.and(P.needed(~K, ~eq, rr, g, ts), P.all_in(~K, ~eq, ts, p)),
+    ord_rev(~K, ~eq, x, g, Nil{}, hb, {==}),
+    and_true(P.needed(~K, ~eq, rr, g, ts), P.all_in(~K, ~eq, ts, p),
+      (%Equal.sym(List<&2, K>, rr, seg, Equal.trans(List<&2, K>, rr, x, seg, rev_rev(K, x, Nil{}),
+          Equal.trans(List<&2, K>, x, P.cat(K, seg, Nil{}), seg, hx, cat_nil(K, seg)))) : {P.needed(~K, ~eq, _, g, ts) == True{} : Bool}
+       hn),
+      all_in_trans(~K, ~eq, ~sound, ts, x, p, ha, all_in_rev(~K, ~eq, ~refl, x, Nil{}))))
+
+def err.of(-K: Data, r: Result<&2, &2, P.Error<K>, List<&2, K>>, d: P.Error<K>) -> P.Error<K>:
+  match r:
+    case Fail{e}:
+      e
+    case Done{x}:
+      d
+
+def fail_inj(-K: Data, +a: P.Error<K>, -b: P.Error<K>, h: {Fail{a} == Fail{b} : Result<&2, &2, P.Error<K>, List<&2, K>>}) -> {a == b : P.Error<K>}:
+  Equal.cong(Result<&2, &2, P.Error<K>, List<&2, K>>, P.Error<K>, r => err.of(K, r, a), Fail{a}, Fail{b}, h)
+
+def done_ne_fail(-K: Data, -x: List<&2, K>, -e: P.Error<K>, h: {Done{x} == Fail{e} : Result<&2, &2, P.Error<K>, List<&2, K>>}) -> Empty:
+  %h : Bool.pick(Type, Result.is_done(&2, &2, P.Error<K>, List<&2, K>, _), Unit, Empty)
+  Unit{}
+
+# What plan.check makes of a walk that ended well: the walk's error, or Done.
+def fin(
+  ~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), r: Result<&2, &2, P.Error<K>, List<&2, K>>,
+  +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +e: P.Error<K>,
+  hg: Good(~K, ~eq, g, ts, ts, Nil{}, Nil{}, r), h: {P.plan.check(~K, ~eq, g, ts, r) == Fail{e} : Result<&2, &2, P.Error<K>, List<&2, K>>}
+) -> Bad(~K, ~eq, g, ts, e):
+  match r:
+    case Fail{a}:
+      %fail_inj(K, a, e, h) : Bad(~K, ~eq, g, ts, _)
+      hg
+    case Done{+x}:
+      +p = P.rev(K, x, Nil{})
+      Empty.absurd(Bad(~K, ~eq, g, ts, e),
+        done_ne_fail(K, p, e,
+          (%valid_of_post(~K, ~eq, ~sound, ~refl, g, ts, x, hg) : {P.plan.ok(K, _, p) == Fail{e} : Result<&2, &2, P.Error<K>, List<&2, K>>}
+           h)))
+
+def plan_bad(~K: Data, ~eq: K -> K -> Bool, ~sound: Sound(~K, ~eq), ~refl: Refl(~K, ~eq), +g: List<&2, P.Node<K>>, +ts: List<&2, K>, +e: P.Error<K>,
+  h: {P.plan(~K, ~eq, g, ts) == Fail{e} : Result<&2, &2, P.Error<K>, List<&2, K>>}
+) -> Bad(~K, ~eq, g, ts, e):
+  fin(~K, ~eq, ~sound, ~refl, P.go(~K, ~eq, 1n+Len(K, g), ts, g, Nil{}, Nil{}), g, ts, e, plan_good(~K, ~eq, ~sound, ~refl, g, ts), h)
+
+def pair.fst(-A: Type, -B: Type, p: A & B) -> A:
+  (a, b) = p
+  a
+
+def pair.snd(-A: Type, -B: Type, p: A & B) -> B:
+  (a, b) = p
+  b
+
+def Laws.plan_missing(K, eq, sound, refl, g, ts, n, c, h):
+  pair.fst({P.deps(~K, ~eq, g, n) == None{} : Maybe<&2, List<&2, K>>}, {Laws.linked(~K, ~eq, P.cat(K, c, [n]), g, ts, None{}) == True{} : Bool},
+    plan_bad(~K, ~eq, ~sound, ~refl, g, ts, P.Missing{n, c}, h))
+
+def Laws.plan_missing_chain(K, eq, sound, refl, g, ts, n, c, h):
+  pair.snd({P.deps(~K, ~eq, g, n) == None{} : Maybe<&2, List<&2, K>>}, {Laws.linked(~K, ~eq, P.cat(K, c, [n]), g, ts, None{}) == True{} : Bool},
+    plan_bad(~K, ~eq, ~sound, ~refl, g, ts, P.Missing{n, c}, h))
+
+def Laws.plan_cycle_path(K, eq, sound, refl, g, ts, c, h):
+  plan_bad(~K, ~eq, ~sound, ~refl, g, ts, P.Cycle{c}, h)
+
+def Laws.plan_complete(K, eq, sound, refl, g, ts, h):
+  plan_bad(~K, ~eq, ~sound, ~refl, g, ts, P.Refused{}, h)
 
 # Fixtures
 # --------
