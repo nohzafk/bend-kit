@@ -3,7 +3,7 @@
 Dependency plans for builds and task graphs. `plan` gives the dependency closure of the requested targets in an order where every prerequisite comes first, or says which node is missing or which cycle blocks the plan. `invalidate` finds what an input change makes stale, and `exec` decides which nodes run, which are reused, and which are skipped. `build` runs real commands on top of them. `LAWS.bend` states these properties for every graph, and `PROOF.bend` proves them.
 
 ```bend
-import bend-kit-planner@0.3.0.0/planner.bend as P
+import bend-kit-planner@0.4.0.0/planner.bend as P
 ```
 
 It imports `bend-kit-bytes@0.3.3.0`, `bend-kit-hash@0.3.0.4`, `bend-kit-files@0.3.1.0`, and `bend-kit-process@0.5.0.1`.
@@ -14,7 +14,7 @@ Build `app` from `lib`. A second build reuses both; a change to `lib.c` rebuilds
 
 ```bend
 import Base
-import bend-kit-planner@0.3.0.0/planner.bend as P
+import bend-kit-planner@0.4.0.0/planner.bend as P
 
 def tasks() -> List<&2, P.Task>:
   [P.Task{"app", ["lib"], ["cc", "-o", "app", "main.c", "lib.o"], ["main.c"]},
@@ -31,7 +31,7 @@ def show(es: List<&2, P.Outcome>) -> IO(Unit):
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    es : List<&2, P.Outcome> <- IO.try(List<&2, P.Outcome>, P.build(tasks(), ["app"], ".", ".planner-stamps"))
+    es : List<&2, P.Outcome> <- IO.try(List<&2, P.Outcome>, P.build(tasks(), ["app"], ".", ".planner-stamps", 4))
     show(es)
 ```
 
@@ -85,11 +85,19 @@ The build layer fixes `K` to `String`.
 | def | result |
 |---|---|
 | `Task{id, deps, argv, inputs}` | a node with its command and the source files it reads; an empty `argv` is a group with no command |
-| `build(tasks, targets, dir, path)` | `Run`: an `Outcome{node, status, ran}` for each planned node, in plan order. It plans `targets`, hashes each task, runs the stale tasks in `dir` in plan order, reuses the rest, and writes the stamps to `path` |
+| `build(tasks, targets, dir, path, jobs)` | `Run`: an `Outcome{node, status, ran}` for each planned node, in plan order. It plans `targets`, hashes each task, runs the stale tasks in `dir`, up to `jobs` at once (at least 1), reuses the rest, and writes the stamps to `path` |
 | `Ran` | what a command left: `Exited{code, out, err}`, with the last 4096 octets of stdout and stderr as byte strings, or `Unstarted{error}`. `ran` is `None` when no command ran: the node was reused, skipped, or a group |
 | `Error.show(e)`, `Status.show(s)` | text for an error or a status |
 
 `build` runs each command with `process` in `dir`, with no shell, no stdin, and the inherited environment. Exit status 0 is `Built`; any other status, or a failure to start, is `Failed`. Paths in `inputs` are relative to `dir`. `build` fails, and runs nothing, when a task id is empty or not printable ASCII, or when `plan` fails.
+
+`build` starts nodes in plan order. A node waits while one of its prerequisites runs, or while `jobs` commands run; then the first command to finish lets it go on. So independent tasks run at the same time: in a diamond, the two middle tasks run together. The JavaScript lane runs one command at a time, because its `process.run` blocks; a native build runs them at once.
+
+| def | result |
+|---|---|
+| `par(es, p, g, stale, limit, pool)` | the model of a parallel run: `es` holds the finishes in the order they arrive |
+| `decide.par(g, stale, limit, pool, x)` | `PSkip{}`, `PMark{status}`, `PStart{}`, or `PWait{}` for node `x` |
+| `finish(pool, e)`, `apply(a, pool, x)` | the pool after a finish, or after a decision |
 
 ## Laws
 
@@ -113,8 +121,14 @@ The build layer fixes `K` to `String`.
 | `exec_once` | each node gets at most one status, so its command runs at most once |
 | `exec_total` | each node of `p` gets a status |
 | `exec_fresh` | a stale node is never reused |
+| `par_ready`, `par_running` | in a parallel run, a node that ran, was reused, or runs now had every prerequisite `Built` or `Fresh` |
+| `par_blocked` | in a parallel run, a prerequisite that did not succeed keeps its dependents from success |
+| `par_once`, `par_once_status` | each command starts at most once, and each node gets at most one status |
+| `par_fresh` | in a parallel run, a stale node is never reused |
+| `par_limit` | no more than `limit` commands run at once |
+| `par_total` | with room for one command, a run that ends with nothing running gives every node of `p` a status |
 
-Every law takes `eq` as sound: `eq(x, y)` gives `x == y`. The completeness laws also take it as reflexive: `eq(x, x)`. `String.eq` is both. The `exec_` laws hold for any node list, not only a plan. The fixture laws check the same functions on a diamond, a cycle, and a missing node.
+Every law takes `eq` as sound: `eq(x, y)` gives `x == y`. The completeness and parallel laws also take it as reflexive: `eq(x, x)`. `String.eq` is both. The `exec_` and `par_` laws hold for any node list, not only a plan, and the `par_` laws hold for every order in which commands finish. The fixture laws check the same functions on a diamond, a cycle, and a missing node.
 
 ## Trust boundary
 
@@ -124,13 +138,12 @@ The proofs cover the pure core. They do not cover hashing, the disk, or the comm
 - **Inputs are sources.** `build` hashes all inputs before it runs a command. List only files that no task writes; an edge to the task that writes a file covers that file.
 - **Commands.** A command that exits 0 is taken to have written its outputs. `build` does not check them, and it does not sandbox the command.
 - **Hashing.** A stamp is xxHash64 over the argv, the prerequisite ids, and each input path and its octets. xxHash64 is not cryptographic: two inputs with one hash can make a stale task look fresh. Do not reuse outputs across a trust boundary on these stamps.
-- **The run loop.** `build` repeats the shape of `exec` in `IO`: it uses `decide` and `step` for each node and takes each `Run` result from the command. The laws cover `exec`.
+- **The run loop.** `build` repeats the shape of `par` in `IO`: it uses `decide.par`, `apply`, and `finish` for each step, and takes each finish from a job's message. The laws cover `par`. A wait always finds a running command when `jobs` is at least 1, which `build` ensures.
 - **Stamps file.** `build` writes the stamps through `path.tmp` and a rename, so a reader sees the old file or the new one. A crash before the rename keeps the old stamps, so the next build reruns what the lost build ran. An unreadable stamps file counts as empty. Two builds that share a stamps file must not run at once.
 
 ## Limits
 
 - `plan`, `invalidate`, and `exec` keep sets in lists and look up prerequisites in the node list, so a plan of n nodes takes O(n²) comparisons. A plan of 1,000 nodes takes about 120 ms. See [bench/README.md](bench/README.md).
-- `build` runs one command at a time.
 - A task id is printable ASCII and not empty, because the stamps file holds one id per line.
 
 ## Bench
